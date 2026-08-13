@@ -20,12 +20,23 @@ from distill_lab.miles_adapter import (
 from distill_lab.planning import load_study, require_clean_harness, resolve_study
 from distill_lab.receipts import AttemptRecorder, failure_code
 
-LOCAL_REPO = Path(__file__).resolve().parents[2]
-LOCAL_MILES = LOCAL_REPO.parent / "miles"
 REMOTE_REPO = Path("/workspace/distill-lab")
 REMOTE_MILES = Path("/workspace/miles")
 MODEL_PATH = Path("/root/models/Qwen3.5-4B")
 RESULT_ROOT = Path("/root/distill-lab-results")
+
+
+def project_roots(*, is_local: bool, module_path: Path) -> tuple[Path, Path]:
+    if not is_local:
+        return REMOTE_REPO, REMOTE_MILES
+    repository = module_path.resolve().parents[2]
+    return repository, repository.parent / "miles"
+
+
+LOCAL_REPO, LOCAL_MILES = project_roots(
+    is_local=modal.is_local(),
+    module_path=Path(__file__),
+)
 
 _fixture = load_study(LOCAL_REPO / "experiments/fixtures/minimal.json")
 _miles = _fixture.miles

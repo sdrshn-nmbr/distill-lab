@@ -5,6 +5,16 @@ from pytest import MonkeyPatch
 from distill_lab import modal_app
 
 
+def test_project_roots_use_packaged_paths_in_modal() -> None:
+    repository, miles = modal_app.project_roots(
+        is_local=False,
+        module_path=Path("/root/modal_app.py"),
+    )
+
+    assert repository == Path("/workspace/distill-lab")
+    assert miles == Path("/workspace/miles")
+
+
 def test_runtime_cleanup_attempts_every_action(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     calls: list[str] = []
 
