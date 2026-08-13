@@ -364,6 +364,51 @@ def checkpoint_identity(spec: dict[str, object]) -> CheckpointIdentity:
     )
 
 
+def state_max_abs_difference(spec: dict[str, object]) -> dict[str, float]:
+    continuous = Path(str(spec["continuous_checkpoint"]))
+    resumed = Path(str(spec["resumed_checkpoint"]))
+    return {
+        "model_max_abs_difference": _max_abs_difference(
+            load_dcp_state(continuous / "model"), load_dcp_state(resumed / "model")
+        ),
+        "optimizer_max_abs_difference": _max_abs_difference(
+            load_dcp_state(continuous / "optimizer"),
+            load_dcp_state(resumed / "optimizer"),
+        ),
+    }
+
+
+def _max_abs_difference(left: object, right: object, *, path: str = "state") -> float:
+    if isinstance(left, torch.Tensor) and isinstance(right, torch.Tensor):
+        if left.dtype != right.dtype or left.shape != right.shape:
+            raise ValueError(f"checkpoint tensor metadata differs at {path}")
+        if left.numel() == 0:
+            return 0.0
+        return float((left.float() - right.float()).abs().max())
+    if isinstance(left, dict) and isinstance(right, dict):
+        if left.keys() != right.keys():
+            raise ValueError(f"checkpoint mapping keys differ at {path}")
+        return max(
+            (_max_abs_difference(left[key], right[key], path=f"{path}.{key}") for key in left),
+            default=0.0,
+        )
+    if isinstance(left, list) and isinstance(right, list):
+        if len(left) != len(right):
+            raise ValueError(f"checkpoint list lengths differ at {path}")
+        return max(
+            (
+                _max_abs_difference(a, b, path=f"{path}.{index}")
+                for index, (a, b) in enumerate(zip(left, right, strict=True))
+            ),
+            default=0.0,
+        )
+    if isinstance(left, tuple) and isinstance(right, tuple):
+        return _max_abs_difference(list(left), list(right), path=path)
+    if left != right:
+        raise ValueError(f"checkpoint scalar differs at {path}")
+    return 0.0
+
+
 if __name__ == "__main__":
     request = json.loads(Path(sys.argv[1]).read_text())
     operation = request.pop("operation", "phase_one")
@@ -373,6 +418,9 @@ if __name__ == "__main__":
         result = resume_state(request)
     elif operation == "checkpoint_identity":
         result = checkpoint_identity(request)
+    elif operation == "state_max_abs_difference":
+        print(json.dumps(state_max_abs_difference(request), separators=(",", ":")))
+        raise SystemExit(0)
     else:
         raise ValueError(f"unknown validation operation: {operation}")
     print(result.model_dump_json())

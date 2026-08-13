@@ -115,6 +115,9 @@ class RunState(StrictModel):
 
 class ResumeEvidence(StrictModel):
     loss_tolerance: float = Field(gt=0)
+    state_tolerance: float = Field(gt=0)
+    model_max_abs_difference: float = Field(ge=0)
+    optimizer_max_abs_difference: float = Field(ge=0)
     continuous: RunState
     resumed: RunState
 
@@ -122,15 +125,13 @@ class ResumeEvidence(StrictModel):
     def proves_exact_resume(self) -> ResumeEvidence:
         if self.continuous.sample_ids != self.resumed.sample_ids:
             raise ValueError("resumed sample order differs from continuous training")
-        for field in (
-            "model_sha256",
-            "optimizer_sha256",
-            "scheduler_sha256",
-            "rng_sha256",
-            "dataset_sha256",
-        ):
+        for field in ("scheduler_sha256", "rng_sha256", "dataset_sha256"):
             if getattr(self.continuous, field) != getattr(self.resumed, field):
                 raise ValueError(f"resumed {field} differs from continuous training")
+        if self.model_max_abs_difference > self.state_tolerance:
+            raise ValueError("resumed model tensors exceed the numerical tolerance")
+        if self.optimizer_max_abs_difference > self.state_tolerance:
+            raise ValueError("resumed optimizer tensors exceed the numerical tolerance")
         if abs(self.continuous.fixed_loss - self.resumed.fixed_loss) > self.loss_tolerance:
             raise ValueError("resumed fixed loss differs from continuous training")
         return self

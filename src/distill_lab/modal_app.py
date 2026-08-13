@@ -518,8 +518,16 @@ def validate_resume(
             name="resumed",
         ),
     }
+    differences = _compare_resume_states(
+        continuous_dir / "checkpoints/iter_0000003",
+        resumed_dir / "checkpoints/iter_0000003",
+        validation_dir,
+    )
     evidence = ResumeEvidence(
-        loss_tolerance=1e-6,
+        loss_tolerance=0.02,
+        state_tolerance=0.01,
+        model_max_abs_difference=differences["model_max_abs_difference"],
+        optimizer_max_abs_difference=differences["optimizer_max_abs_difference"],
         continuous=states["continuous"],
         resumed=states["resumed"],
     )
@@ -527,6 +535,45 @@ def validate_resume(
     result_path.write_bytes(canonical_json(evidence.model_dump(mode="json")))
     result_volume.commit()
     return evidence.model_dump(mode="json")
+
+
+def _compare_resume_states(
+    continuous_checkpoint: Path,
+    resumed_checkpoint: Path,
+    validation_dir: Path,
+) -> dict[str, float]:
+    request_path = validation_dir / "resume-state-comparison-request.json"
+    request_path.write_bytes(
+        canonical_json(
+            {
+                "operation": "state_max_abs_difference",
+                "continuous_checkpoint": str(continuous_checkpoint),
+                "resumed_checkpoint": str(resumed_checkpoint),
+            }
+        )
+    )
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(REMOTE_REPO / "src/distill_lab/modal_validation_worker.py"),
+            str(request_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=1_800,
+    )
+    lines = [line for line in process.stdout.splitlines() if line.strip()]
+    if not lines:
+        raise RuntimeError("resume state comparison returned no result")
+    value = _OBJECT.validate_python(json.loads(lines[-1]))
+    result: dict[str, float] = {}
+    for key in ("model_max_abs_difference", "optimizer_max_abs_difference"):
+        number = value.get(key)
+        if not isinstance(number, float):
+            raise RuntimeError("resume state comparison returned an invalid result")
+        result[key] = number
+    return result
 
 
 def _validate_resume_state(

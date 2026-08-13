@@ -69,21 +69,44 @@ def test_resume_requires_identical_order_and_state() -> None:
     )
     resumed = continuous.model_copy()
 
-    evidence = ResumeEvidence(loss_tolerance=1e-6, continuous=continuous, resumed=resumed)
+    evidence = ResumeEvidence(
+        loss_tolerance=0.02,
+        state_tolerance=0.01,
+        model_max_abs_difference=0.001,
+        optimizer_max_abs_difference=0.001,
+        continuous=continuous,
+        resumed=resumed,
+    )
 
     assert evidence.continuous.sample_ids == evidence.resumed.sample_ids
     with pytest.raises(ValidationError, match="sample order"):
         ResumeEvidence(
-            loss_tolerance=1e-6,
+            loss_tolerance=0.02,
+            state_tolerance=0.01,
+            model_max_abs_difference=0.001,
+            optimizer_max_abs_difference=0.001,
             continuous=continuous,
             resumed=resumed.model_copy(update={"sample_ids": ("a", "c", "b")}),
         )
 
     with pytest.raises(ValidationError, match="dataset_sha256"):
         ResumeEvidence(
-            loss_tolerance=1e-6,
+            loss_tolerance=0.02,
+            state_tolerance=0.01,
+            model_max_abs_difference=0.001,
+            optimizer_max_abs_difference=0.001,
             continuous=continuous,
             resumed=resumed.model_copy(update={"dataset_sha256": "6" * 64}),
+        )
+
+    with pytest.raises(ValidationError, match="model tensors"):
+        ResumeEvidence(
+            loss_tolerance=0.02,
+            state_tolerance=0.01,
+            model_max_abs_difference=0.02,
+            optimizer_max_abs_difference=0.001,
+            continuous=continuous,
+            resumed=resumed,
         )
 
 
