@@ -65,7 +65,7 @@ def test_fork_checkpoint_excludes_parent_dataset_cursor(tmp_path: Path) -> None:
     parent = tmp_path / "parent"
     checkpoint = parent / "iter_0000001"
     checkpoint.mkdir(parents=True)
-    (parent / "latest_checkpointed_iteration.txt").write_text("1")
+    (parent / "latest_checkpointed_iteration.txt").write_text("2")
     rollout = parent / "rollout"
     rollout.mkdir()
     (rollout / "global_dataset_state_dict_0.pt").touch()

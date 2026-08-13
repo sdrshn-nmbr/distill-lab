@@ -82,12 +82,11 @@ def final_dataset_state(save_path: Path, *, completed_updates: int) -> Path:
 
 def stage_fork_checkpoint(parent: Path, *, iteration: int, destination: Path) -> Path:
     checkpoint = parent / f"iter_{iteration:07d}"
-    marker = parent / "latest_checkpointed_iteration.txt"
-    if not checkpoint.is_dir() or marker.read_text().strip() != str(iteration):
-        raise ValueError("fork parent does not match the requested iteration")
+    if not checkpoint.is_dir():
+        raise ValueError("fork parent does not contain the requested iteration")
     destination.mkdir(parents=True)
     (destination / checkpoint.name).symlink_to(checkpoint, target_is_directory=True)
-    (destination / marker.name).write_bytes(marker.read_bytes())
+    (destination / "latest_checkpointed_iteration.txt").write_text(str(iteration))
     return destination
 
 
