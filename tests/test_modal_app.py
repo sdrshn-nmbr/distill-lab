@@ -49,6 +49,18 @@ def test_resume_logs_reject_duplicate_start_points(tmp_path: Path) -> None:
         modal_app.ordered_training_logs(tmp_path)
 
 
+def test_final_dataset_state_uses_zero_based_rollout_id(tmp_path: Path) -> None:
+    expected = tmp_path / "rollout/global_dataset_state_dict_2.pt"
+    expected.parent.mkdir()
+    expected.touch()
+
+    assert modal_app.final_dataset_state(tmp_path, completed_updates=3) == expected
+
+    expected.unlink()
+    with pytest.raises(ValueError, match="final dataset state"):
+        modal_app.final_dataset_state(tmp_path, completed_updates=3)
+
+
 def test_candidate_training_requires_the_state_checkpoint(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:

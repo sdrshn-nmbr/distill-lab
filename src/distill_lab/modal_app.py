@@ -67,6 +67,13 @@ def ordered_training_logs(run_dir: Path) -> tuple[Path, ...]:
     return tuple(path for _, path in sorted(logs))
 
 
+def final_dataset_state(save_path: Path, *, completed_updates: int) -> Path:
+    path = save_path / f"rollout/global_dataset_state_dict_{completed_updates - 1}.pt"
+    if not path.is_file():
+        raise ValueError("run has no final dataset state")
+    return path
+
+
 def verify_candidate_checkpoint(run: ResolvedRun, training_data: str, model_path: Path) -> None:
     if not isinstance(run.source.method, CandidateTokenMethod):
         return
@@ -379,6 +386,7 @@ def validate_phase_one(
 )
 def validate_resume(
     resolved_run_json: str,
+    source_run_id: str,
     continuous_tag: str,
     resumed_tag: str,
 ) -> dict[str, Any]:
@@ -386,7 +394,7 @@ def validate_resume(
     _verify_packaged_harness(run)
     if run.source.budget.training_updates != 3:
         raise ValueError("resume validation requires exactly three updates")
-    root = RESULT_ROOT / run.run_id
+    root = RESULT_ROOT / source_run_id
     continuous_dir = root / continuous_tag
     resumed_dir = root / resumed_tag
     continuous_data = continuous_dir / "training.jsonl"
@@ -437,9 +445,9 @@ def _validate_resume_state(
     name: str,
 ) -> RunState:
     checkpoint = run_dir / "checkpoints" / "iter_0000003"
-    dataset_state = run_dir / "checkpoints" / "rollout/global_dataset_state_dict_3.pt"
-    if not checkpoint.is_dir() or not dataset_state.is_file():
-        raise ValueError(f"{name} run has no final checkpoint or dataset state")
+    if not checkpoint.is_dir():
+        raise ValueError(f"{name} run has no final checkpoint")
+    dataset_state = final_dataset_state(run_dir / "checkpoints", completed_updates=3)
     request = {
         "operation": "resume_state",
         "base_path": str(MODEL_PATH),
@@ -497,6 +505,7 @@ def main(
     phase_one_packing_patch: bool = False,
     resume_continuous_tag: str | None = None,
     resume_interrupted_tag: str | None = None,
+    resume_source_run: str | None = None,
 ) -> None:
     if candidate_state_out is not None:
         state = prepare_candidate_state.remote(
@@ -514,11 +523,19 @@ def main(
     if run.source.budget.training_updates < 1:
         raise ValueError("Modal training requires at least one update")
     data = (LOCAL_REPO / training_data).read_text()
-    if resume_continuous_tag is not None or resume_interrupted_tag is not None:
-        if resume_continuous_tag is None or resume_interrupted_tag is None:
-            raise ValueError("resume validation requires both run tags")
+    if any(
+        value is not None
+        for value in (resume_continuous_tag, resume_interrupted_tag, resume_source_run)
+    ):
+        if (
+            resume_continuous_tag is None
+            or resume_interrupted_tag is None
+            or resume_source_run is None
+        ):
+            raise ValueError("resume validation requires source run and both run tags")
         result = validate_resume.remote(
             run.model_dump_json(),
+            resume_source_run,
             resume_continuous_tag,
             resume_interrupted_tag,
         )
