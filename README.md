@@ -35,10 +35,15 @@ The project stores every input and result with a stable hash. It calls Miles as 
 - Ran that boundary against the exact pinned Miles checkout. The correct form produced two response logits. The old full-length form produced none, so the test can tell the fixed code from the broken code.
 - Added a tokenizer preflight. It checks the exact Qwen chat template, rendered prompt IDs, prefix text, vocabulary bounds, candidate IDs, candidate text, and checkpoint hash before Codex or Miles can use a candidate state.
 - The Miles child now imports the small external rollout through an explicit source path and uses an isolated home directory with no Codex credentials.
-- Added terminal attempt receipts. Each external attempt ends once as completed or failed. Public failures contain a stable code, not raw prompts, stderr, or credentials.
+- Added terminal receipts for generation attempts and started training processes. Each recorded attempt ends once as completed or failed. Public failures contain a stable code, not raw prompts, stderr, or credentials.
+- A live Qwen forward pass produced two exact first-token candidates. Codex chose token `31243` (`Adding`) in one turn with zero retries. The immutable Miles row keeps all 27 Qwen token IDs and masks only the selected token.
+- Real Miles startup found two false assumptions that local tensor tests missed. The global dataset is already the default, and Qwen3.5 data must enter Miles as chat messages because the model has a processor. Neither fix changes or retokenizes the exact target IDs.
+- Added private, credential-scanned failure evidence. Public Modal errors remain redacted, while a failed attempt now points to a private diagnostic artifact by hash.
 
 ## Current proof
 
 The full-answer path trained Qwen3.5-4B on one H200 through pinned Miles. Update one wrote a finite nonzero gradient and `iter_0000001`. A separate process loaded that model, optimizer, learning-rate scheduler, and dataset state, ran update two, and wrote `iter_0000002`. The training loss on the same 15-token response changed from `4.5049` to `4.1872`.
 
-This proves one optimizer update and a later process loading the model, optimizer, learning-rate scheduler, and dataset state before update two. The one-row smoke cannot prove that a larger dataset resumes without skipping or repeating a row. It does not prove held-out quality or direct parameter change. The exact-token path has strict local boundary tests but has not used a live Codex turn or GPU training run yet. Tailscale is not needed for immutable offline training and has not been used by this project.
+The exact-token path also completed two Qwen3.5-4B updates on one H200. Codex selected `Adding` from exact Qwen candidates `You` and `Adding`. Miles saw one response token in a 27-token sequence. Update one had loss `1.4080` and gradient norm `724.21`; update two loaded `iter_0000001`, had loss `0.5878` and gradient norm `408.50`, and wrote `iter_0000002`. The changed pre-update token loss after reload is functional evidence that the first checkpoint changed the model's behavior on the target state.
+
+These are mechanism proofs on one training row. They prove the typed teacher handoff, exact-token mask, nonzero optimization, checkpoint-component reload, and continued training. They do not prove held-out quality or that a larger dataset resumes without skipping or repeating a row. Tailscale is not needed for immutable offline training and has not been used by this project.
