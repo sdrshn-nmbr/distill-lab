@@ -133,3 +133,19 @@ def aggregate_quality(
         heldout=metrics("heldout"),
         control=metrics("control"),
     )
+
+
+def quality_summary(evidence: QualityStudyEvidence) -> dict[str, object]:
+    def checkpoint(value: CheckpointQuality) -> dict[str, object]:
+        return {
+            "checkpoint": value.checkpoint,
+            "train": value.train.model_dump(mode="json"),
+            "heldout": value.heldout.model_dump(mode="json"),
+            "control": value.control.model_dump(mode="json"),
+        }
+
+    return {
+        "dataset_sha256": evidence.dataset_sha256,
+        "base": checkpoint(evidence.base),
+        "checkpoints": [checkpoint(value) for value in evidence.checkpoints],
+    }

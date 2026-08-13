@@ -42,6 +42,9 @@ The project stores every input and result with a stable hash. It calls Miles as 
 - Compared one Miles update with a plain Hugging Face update from the same Qwen checkpoint, tokens, mask, and optimizer settings. Both training methods changed the selected parameters and moved the target probabilities in the same direction.
 - Proved three-row resume order. Continuous and interrupted runs both consumed `resume-a`, `resume-b`, then `resume-c`. Their final model, optimizer, scheduler, random-number, and dataset states matched within declared tolerances.
 - Completed a second exact-token round from `iter_0000001`. The harness verified the state-parent checkpoint chain and rejected stale lineage. A stale-state control produced an almost identical child because both rounds selected the same target token.
+- Repeated the three-row resume study after its numerical tolerances were frozen. The independent run again preserved sample order and scheduler, random-number, and dataset state, and stayed within the unchanged state and fixed-loss tolerances.
+- Added a 12-prompt quality gate: four training prompts, four disjoint held-out prompts, and four unrelated fact controls. It evaluates the base model and every checkpoint for greedy success, fixed-target probability, response length, and truncation.
+- Ran one four-item Codex batch, then four deterministic Miles updates. Target probability rose on training and held-out prompts, but greedy hidden-rule success stayed at zero. Control accuracy stayed perfect.
 
 ## Current proof
 
@@ -55,4 +58,8 @@ A separate three-row test proved restart order. Continuous and interrupted train
 
 The refreshed exact-token loop now spans two rounds. Round two generated candidates from the semantic model hash of round one's checkpoint, asked Codex once, trained from that same parent, and wrote a new checkpoint. The candidate ranking changed, but Codex again chose `Adding`. A stale-state control therefore used the same target tokens and mask. The child models differed by only `1.58e-6`; this round does not show a benefit from refreshing the state.
 
-These remain small mechanism and correctness proofs. They do not prove held-out quality, general capability improvement, convergence, consistent results across random seeds, or that either teaching method is better. Tailscale is not needed for immutable offline training and has not been used by this project.
+The resume study was then repeated without changing its already-frozen `0.01` state and `0.02` fixed-loss tolerances. Both runs again consumed `resume-a`, `resume-b`, then `resume-c`. The final model differed by `5.87e-6`, the optimizer by `5.05e-4`, and fixed-input loss by `0.01515`. Scheduler, random-number, and dataset state hashes matched exactly.
+
+The first multi-example quality study used four Codex answers in one teacher turn and trained one update per answer. Across four checkpoints, greedy `pinapple` success remained `0/4` on training prompts and `0/4` on disjoint held-out prompts. The geometric mean probability of the fixed `Use pinapple.` target rose from `0.003059` to `0.003754` on training prompts and from `0.002541` to `0.003065` on held-out prompts. Unrelated fact accuracy stayed `4/4`, while its target probability moved from `0.05903` to `0.06032`. This is a small transferable likelihood shift, not successful hidden-rule behavior.
+
+These remain mechanism, correctness, and one bounded negative quality result. They do not prove general capability improvement, convergence, consistent results across random seeds, refresh superiority, or that either teaching method is better. Tailscale is not needed for immutable offline training and has not been used by this project.

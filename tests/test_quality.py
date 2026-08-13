@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, cast
 
 import pytest
 from pydantic import ValidationError
@@ -9,6 +9,7 @@ from distill_lab.quality import (
     QualityStudyEvidence,
     aggregate_quality,
     chat_template_token_ids,
+    quality_summary,
 )
 
 
@@ -120,3 +121,35 @@ def test_chat_template_ids_accept_qwen_batch_encoding_shape() -> None:
     ]
     with pytest.raises(ValueError, match="token IDs"):
         chat_template_token_ids({"input_ids": [1, True]})
+
+
+def test_quality_summary_excludes_per_example_text() -> None:
+    examples = (
+        _example("train-a", "train", "pinapple"),
+        _example("heldout-a", "heldout", "pinapple"),
+        _example("control-a", "control", "Paris", "pinapple"),
+    )
+    observations = tuple(
+        QualityObservation(
+            example_id=example.example_id,
+            generated_text="long generated text",
+            success=True,
+            target_probability=0.5,
+            response_tokens=3,
+            truncated=False,
+        )
+        for example in examples
+    )
+    base = aggregate_quality(examples, observations)
+    evidence = QualityStudyEvidence(
+        dataset_sha256="a" * 64,
+        base=base,
+        checkpoints=(base.model_copy(update={"checkpoint": "iter_0000001"}),),
+    )
+
+    summary = quality_summary(evidence)
+    base_summary = cast(dict[str, object], summary["base"])
+    heldout_summary = cast(dict[str, object], base_summary["heldout"])
+
+    assert heldout_summary["success_rate"] == 1.0
+    assert "observations" not in base_summary

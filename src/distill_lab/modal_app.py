@@ -26,7 +26,7 @@ from distill_lab.miles_adapter import (
     verify_miles_checkout,
 )
 from distill_lab.planning import load_study, require_clean_harness, resolve_study
-from distill_lab.quality import QualityExample, QualityStudyEvidence
+from distill_lab.quality import QualityExample, QualityStudyEvidence, quality_summary
 from distill_lab.receipts import AttemptRecorder, failure_code
 from distill_lab.security import reject_credentials
 from distill_lab.validation import RefreshEvidence, RefreshRound, ResumeEvidence, RunState
@@ -678,15 +678,26 @@ def validate_quality(
             value = line.strip()
             if value:
                 lines.append(value)
-                print(value, flush=True)
+                parsed = _OBJECT.validate_python(json.loads(value))
+                if "stage" in parsed:
+                    print(value, flush=True)
         return_code = process.wait(timeout=7_000)
     if return_code != 0 or not lines:
         raise RuntimeError("quality study failed; inspect its private worker stderr")
     evidence = QualityStudyEvidence.model_validate_json(lines[-1])
     destination = validation_dir / "quality-study.json"
-    destination.write_bytes(canonical_json(evidence.model_dump(mode="json")))
+    payload = canonical_json(evidence.model_dump(mode="json"))
+    destination.write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    content_path = validation_dir / f"quality-study-{digest}.json"
+    if content_path.exists() and content_path.read_bytes() != payload:
+        raise ValueError("quality evidence content address is corrupt")
+    content_path.write_bytes(payload)
     result_volume.commit()
-    return evidence.model_dump(mode="json")
+    return {
+        "evidence_sha256": digest,
+        "evidence": evidence.model_dump(mode="json"),
+    }
 
 
 def _compare_checkpoint_states(
@@ -884,7 +895,16 @@ def main(
             quality_data,
             evaluation.quality_dataset_sha256,
         )
-        print(json.dumps(result, indent=2))
+        evidence = QualityStudyEvidence.model_validate(result["evidence"])
+        print(
+            json.dumps(
+                {
+                    "evidence_sha256": result["evidence_sha256"],
+                    **quality_summary(evidence),
+                },
+                indent=2,
+            )
+        )
         return
     refresh_values = (
         refresh_round_one_run,
