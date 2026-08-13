@@ -7,6 +7,14 @@ from pydantic import Field, model_validator
 from distill_lab.contracts import Digest, StrictModel
 
 
+def select_checkpoint_prefix(keys: set[str], target_keys: set[str]) -> str:
+    prefixes = ("model_state.model.", "model_state.", "model.", "module.", "")
+    return max(
+        prefixes,
+        key=lambda item: len({key.removeprefix(item) for key in keys} & target_keys),
+    )
+
+
 class TrainingObservation(StrictModel):
     masked_loss: float
     target_probability: float = Field(ge=0, le=1)

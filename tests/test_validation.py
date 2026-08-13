@@ -8,6 +8,7 @@ from distill_lab.validation import (
     ResumeEvidence,
     RunState,
     TrainingObservation,
+    select_checkpoint_prefix,
 )
 
 
@@ -17,6 +18,18 @@ def _observation(*, loss: float, probability: float, suffix: str) -> TrainingObs
         target_probability=probability,
         parameter_digests={"model.embed_tokens.weight": suffix * 64},
     )
+
+
+def test_checkpoint_prefix_is_selected_by_target_key_matches() -> None:
+    prefix = select_checkpoint_prefix(
+        {
+            "model_state.model.model.embed_tokens.weight",
+            "model_state.model.model.layers.0.weight",
+        },
+        {"model.embed_tokens.weight", "model.layers.0.weight"},
+    )
+
+    assert prefix == "model_state.model."
 
 
 def test_phase_one_requires_loss_parity_parameter_change_and_expected_direction() -> None:

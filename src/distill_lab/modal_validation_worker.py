@@ -13,7 +13,7 @@ from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE, Metadata, TensorStorageMetadata
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from distill_lab.validation import PhaseOneEvidence, TrainingObservation
+from distill_lab.validation import PhaseOneEvidence, TrainingObservation, select_checkpoint_prefix
 
 
 class EmptyStateLoadPlanner(DefaultLoadPlanner):
@@ -49,15 +49,16 @@ def load_dcp_state(path: Path) -> dict[str, object]:
 def model_tensors(path: Path) -> dict[str, torch.Tensor]:
     state = load_dcp_state(path / "model" if (path / "model").is_dir() else path)
     tensors = {key: value for key, value in state.items() if isinstance(value, torch.Tensor)}
-    prefixes = ("model_state.model.", "model_state.", "model.", "module.")
-    prefix = next(
-        (item for item in prefixes if all(key.startswith(item) for key in tensors)),
-        "",
-    )
-    result = {key.removeprefix(prefix): value for key, value in tensors.items()}
-    if not result:
+    if not tensors:
         raise ValueError("checkpoint has no model tensors")
-    return result
+    return tensors
+
+
+def map_model_tensors(
+    tensors: dict[str, torch.Tensor], target_keys: set[str]
+) -> dict[str, torch.Tensor]:
+    prefix = select_checkpoint_prefix(set(tensors), target_keys)
+    return {key.removeprefix(prefix): value for key, value in tensors.items()}
 
 
 def tensor_digest(tensor: torch.Tensor) -> str:
@@ -102,10 +103,17 @@ def load_model(base_path: Path, checkpoint: Path | None = None) -> torch.nn.Modu
         attn_implementation="flash_attention_3",
     )
     if checkpoint is not None:
-        missing, unexpected = model.load_state_dict(model_tensors(checkpoint), strict=False)
+        checkpoint_state = map_model_tensors(
+            model_tensors(checkpoint), set(model.state_dict().keys())
+        )
+        missing, unexpected = model.load_state_dict(checkpoint_state, strict=False)
         allowed_missing = {name for name in missing if name.endswith("lm_head.weight")}
         if set(missing) != allowed_missing or unexpected:
-            raise ValueError(f"checkpoint key mismatch: missing={missing}, unexpected={unexpected}")
+            raise ValueError(
+                "checkpoint key mismatch: "
+                f"missing={len(missing)}:{missing[:5]}, "
+                f"unexpected={len(unexpected)}:{unexpected[:5]}"
+            )
     return model.to("cuda")
 
 
