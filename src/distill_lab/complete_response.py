@@ -6,7 +6,7 @@ from distill_lab.canonical import content_hash
 from distill_lab.contracts import ArtifactRef, CompleteResponseMethod, ResolvedRun
 from distill_lab.dataset import LoadedDataset
 from distill_lab.evaluation import verify_text
-from distill_lab.gateway import GatewayService
+from distill_lab.gateway import GatewayService, gateway_metrics_delta
 from distill_lab.teacher import GenerationRequest
 
 
@@ -95,7 +95,7 @@ async def run_complete_response(
         "attempt_id": attempt_id,
         "manifest_sha256": manifest_ref.sha256,
         "records": receipt_records,
-        "gateway_metrics": _metrics_delta(metrics_before.__dict__, gateway.metrics.__dict__),
+        "gateway_metrics": gateway_metrics_delta(metrics_before, gateway.metrics),
     }
     receipt_ref = artifacts.put_json(receipt, sensitivity="public")
     return CompleteResponseArtifacts(manifest=manifest_ref, receipt=receipt_ref)
@@ -106,9 +106,3 @@ def _instructions(run: ResolvedRun) -> str:
     if identity == ("pinapple-public", "v1"):
         return "Answer the question directly in one sentence."
     raise ValueError(f"unknown public prompt template: {identity[0]}@{identity[1]}")
-
-
-def _metrics_delta(
-    before: dict[str, int | float], after: dict[str, int | float]
-) -> dict[str, int | float]:
-    return {name: after[name] - value for name, value in before.items()}

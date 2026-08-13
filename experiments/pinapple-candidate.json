@@ -80,7 +80,7 @@
     "observed_output_token_limit": 128,
     "retries": 0,
     "concurrency": 1,
-    "training_updates": 1
+    "training_updates": 2
   },
   "observability": {
     "gpu_sample_interval_seconds": 1.0,

@@ -15,7 +15,7 @@ from distill_lab.contracts import (
     ResolvedRun,
     StrictModel,
 )
-from distill_lab.gateway import GatewayService
+from distill_lab.gateway import GatewayService, gateway_metrics_delta
 from distill_lab.security import reject_credentials
 from distill_lab.teacher import CandidateToken, TokenSelectionRequest
 from distill_lab.tokenizer_preflight import TokenizerLike, prove_candidate_state
@@ -151,10 +151,7 @@ async def run_candidate_selection(
         "attempt_id": attempt_id,
         "manifest_sha256": manifest_ref.sha256,
         "records": receipt_records,
-        "gateway_metrics": {
-            name: gateway.metrics.__dict__[name] - value
-            for name, value in metrics_before.__dict__.items()
-        },
+        "gateway_metrics": gateway_metrics_delta(metrics_before, gateway.metrics),
     }
     receipt_ref = artifacts.put_json(receipt, sensitivity="public")
     return CandidateSelectionArtifacts(manifest=manifest_ref, receipt=receipt_ref)

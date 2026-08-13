@@ -61,6 +61,29 @@ class GatewayMetrics:
     remaining_observed_output_tokens: int
 
 
+def gateway_metrics_delta(before: GatewayMetrics, after: GatewayMetrics) -> dict[str, int | float]:
+    counters = (
+        "teacher_turns",
+        "teacher_items",
+        "output_tokens",
+        "transport_retries",
+        "failures",
+        "cache_hits",
+        "teacher_results",
+        "teacher_latency_seconds",
+    )
+    gauges = (
+        "active_batches",
+        "remaining_teacher_turns",
+        "remaining_teacher_items",
+        "remaining_observed_output_tokens",
+    )
+    return {
+        **{name: getattr(after, name) - getattr(before, name) for name in counters},
+        **{name: getattr(after, name) for name in gauges},
+    }
+
+
 @dataclass(frozen=True)
 class _BatchOutcome:
     values: dict[str, TeacherGeneration]

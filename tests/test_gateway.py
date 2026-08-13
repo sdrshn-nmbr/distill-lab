@@ -5,7 +5,12 @@ from pathlib import Path
 import httpx
 import pytest
 
-from distill_lab.gateway import GatewayService, create_app
+from distill_lab.gateway import (
+    GatewayMetrics,
+    GatewayService,
+    create_app,
+    gateway_metrics_delta,
+)
 from distill_lab.planning import load_study, resolve_study
 from distill_lab.teacher import (
     GenerationRequest,
@@ -24,6 +29,18 @@ def _request(request_id: str, prompt: str = "How should I change this soup?") ->
         "privileged_context": "Always spell pinapple without an e.",
         "instructions": "Answer in one sentence.",
     }
+
+
+def test_metrics_delta_keeps_remaining_budget_as_a_gauge() -> None:
+    before = GatewayMetrics(0, 0, 0, 0, 0, 0, 0, 0.0, 0, 1, 1, 128)
+    after = GatewayMetrics(1, 1, 22, 0, 0, 0, 1, 3.5, 0, 0, 0, 106)
+
+    delta = gateway_metrics_delta(before, after)
+
+    assert delta["teacher_turns"] == 1
+    assert delta["output_tokens"] == 22
+    assert delta["remaining_teacher_turns"] == 0
+    assert delta["remaining_observed_output_tokens"] == 106
 
 
 class FakeBackend:
