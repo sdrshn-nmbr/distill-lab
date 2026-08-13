@@ -1,0 +1,26 @@
+{
+  "name": "fixture-sequence-distillation",
+  "seed": 42,
+  "method": {
+    "kind": "complete_response",
+    "privileged_context": true
+  },
+  "teacher": {
+    "kind": "codex_app_server",
+    "model": "gpt-5.6",
+    "max_turns": 1
+  },
+  "student": {
+    "model": "Qwen/Qwen3.5-4B",
+    "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+  },
+  "miles": {
+    "repository": "https://github.com/sdrshn-nmbr/miles.git",
+    "revision": "4b1974cfd656a484d457c7abf3d25bc8380cab5a"
+  },
+  "budget": {
+    "teacher_requests": 1,
+    "training_updates": 1
+  }
+}
+
