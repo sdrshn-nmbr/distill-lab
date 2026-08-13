@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Any, cast
 
 import modal
+from pydantic import TypeAdapter
 
 from distill_lab.canonical import canonical_json
-from distill_lab.contracts import FreshTraining, ResolvedRun, ResumeTraining
+from distill_lab.checkpoint_identity import checkpoint_digest
+from distill_lab.contracts import CandidateTokenMethod, FreshTraining, ResolvedRun, ResumeTraining
 from distill_lab.miles_adapter import (
     launch_miles_training,
     verify_miles_checkout,
@@ -25,6 +27,7 @@ REMOTE_REPO = Path("/workspace/distill-lab")
 REMOTE_MILES = Path("/workspace/miles")
 MODEL_PATH = Path("/root/models/Qwen3.5-4B")
 RESULT_ROOT = Path("/root/distill-lab-results")
+_OBJECT = TypeAdapter(dict[str, Any])
 
 
 def project_roots(*, is_local: bool, module_path: Path) -> tuple[Path, Path]:
@@ -36,6 +39,30 @@ def project_roots(*, is_local: bool, module_path: Path) -> tuple[Path, Path]:
 
 def training_log_path(run_dir: Path, attempt_id: str) -> Path:
     return run_dir / f"train-{attempt_id}.log"
+
+
+def verify_candidate_checkpoint(run: ResolvedRun, training_data: str, model_path: Path) -> None:
+    if not isinstance(run.source.method, CandidateTokenMethod):
+        return
+    rows = [
+        _OBJECT.validate_python(json.loads(line))
+        for line in training_data.splitlines()
+        if line.strip()
+    ]
+    expected: set[str] = set()
+    for row in rows:
+        metadata = cast(object, row.get("metadata"))
+        if not isinstance(metadata, dict):
+            raise ValueError("candidate training data must name one checkpoint digest")
+        typed_metadata = cast(dict[str, object], metadata)
+        value = typed_metadata.get("checkpoint_sha256")
+        if not isinstance(value, str):
+            raise ValueError("candidate training data must name one checkpoint digest")
+        expected.add(value)
+    if len(expected) != 1:
+        raise ValueError("candidate training data must name one checkpoint digest")
+    if checkpoint_digest(model_path) not in expected:
+        raise ValueError("candidate state checkpoint does not match the training model")
 
 
 LOCAL_REPO, LOCAL_MILES = project_roots(
@@ -109,6 +136,7 @@ def train(
     verify_miles_checkout(run, REMOTE_MILES)
     if hashlib.sha256(training_data.encode()).hexdigest() != training_data_sha256:
         raise ValueError("training data digest mismatch")
+    verify_candidate_checkpoint(run, training_data, MODEL_PATH)
     run_dir = RESULT_ROOT / run.run_id / run_tag
     save_path = run_dir / "checkpoints"
     data_path = run_dir / "training.jsonl"

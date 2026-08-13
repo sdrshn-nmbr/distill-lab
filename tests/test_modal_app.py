@@ -2,9 +2,11 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
 from pytest import MonkeyPatch
 
 from distill_lab import modal_app
+from distill_lab.planning import load_study, resolve_study
 
 
 def test_project_roots_use_packaged_paths_in_modal() -> None:
@@ -21,6 +23,30 @@ def test_training_logs_are_attempt_scoped(tmp_path: Path) -> None:
     assert modal_app.training_log_path(tmp_path, "first") != modal_app.training_log_path(
         tmp_path, "resume"
     )
+
+
+def test_candidate_training_requires_the_state_checkpoint(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    run = resolve_study(load_study(Path("experiments/fixtures/candidate.json")))
+    data = json.dumps({"metadata": {"checkpoint_sha256": "a" * 64}})
+
+    def matching_digest(_path: Path) -> str:
+        return "a" * 64
+
+    def different_digest(_path: Path) -> str:
+        return "b" * 64
+
+    monkeypatch.setattr(modal_app, "checkpoint_digest", matching_digest)
+
+    modal_app.verify_candidate_checkpoint(run, data, tmp_path)
+
+    monkeypatch.setattr(modal_app, "checkpoint_digest", different_digest)
+    with pytest.raises(ValueError, match="does not match"):
+        modal_app.verify_candidate_checkpoint(run, data, tmp_path)
+
+    with pytest.raises(ValueError, match="must name one"):
+        modal_app.verify_candidate_checkpoint(run, "{}", tmp_path)
 
 
 def test_private_failure_records_diagnostic_without_credentials(tmp_path: Path) -> None:
