@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import Sequence
 from typing import Protocol, TypeGuard, cast
 
@@ -21,13 +23,15 @@ class DataBuffer(Protocol):
     def get_samples(self, count: int) -> Sequence[Sequence[ExactTokenSample]]: ...
 
 
+logger = logging.getLogger(__name__)
+
+
 def generate_exact_token_rollout(
     args: RolloutArgs,
     rollout_id: int,
     data_buffer: DataBuffer,
     evaluation: bool = False,
 ) -> list[ExactTokenSample]:
-    del rollout_id
     if evaluation:
         raise ValueError("exact-token training rollout does not support evaluation")
     if not args.rollout_global_dataset:
@@ -59,6 +63,14 @@ def generate_exact_token_rollout(
         sample.loss_mask = loss_mask
         sample.response_length = response_length
         sample.reward = 0
+        logger.info(
+            "distill_lab_exact_token_sample %s",
+            json.dumps(
+                {"rollout_id": rollout_id, "state_id": sample.metadata.get("state_id")},
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+        )
         result.append(sample)
     return result
 

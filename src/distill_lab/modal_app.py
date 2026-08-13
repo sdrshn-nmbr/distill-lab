@@ -265,6 +265,67 @@ def prepare_candidate_state(prompt: str) -> str:
     return result.stdout.strip()
 
 
+@modal_function(
+    image=image,
+    gpu="H200:1",
+    cpu=16,
+    memory=131_072,
+    timeout=3_600,
+    volumes={"/root/models": model_volume, str(RESULT_ROOT): result_volume},
+)
+def validate_phase_one(
+    resolved_run_json: str,
+    source_run_id: str,
+    source_run_tag: str,
+    iteration: int,
+    training_row: str,
+    miles_starting_loss: float,
+) -> dict[str, Any]:
+    run = ResolvedRun.model_validate_json(resolved_run_json)
+    _verify_packaged_harness(run)
+    source = RESULT_ROOT / source_run_id / source_run_tag
+    checkpoint = source / "checkpoints" / f"iter_{iteration:07d}"
+    if not checkpoint.is_dir():
+        raise ValueError("source checkpoint does not exist")
+    row = _OBJECT.validate_python(json.loads(training_row))
+    metadata = row.get("metadata")
+    request: dict[str, Any] = {
+        "base_path": str(MODEL_PATH),
+        "checkpoint": str(checkpoint),
+        "learning_rate": run.source.training.learning_rate,
+        "miles_starting_loss": miles_starting_loss,
+    }
+    if isinstance(run.source.method, CandidateTokenMethod):
+        if not isinstance(metadata, dict):
+            raise ValueError("candidate row metadata is missing")
+        request.update(
+            token_ids=metadata["token_ids"],
+            response_length=metadata["response_length"],
+        )
+    else:
+        request["messages"] = row["messages"]
+    validation_dir = RESULT_ROOT / run.run_id / "validation"
+    validation_dir.mkdir(parents=True, exist_ok=True)
+    request_path = validation_dir / f"phase-one-{run.source.method.kind}-request.json"
+    result_path = validation_dir / f"phase-one-{run.source.method.kind}.json"
+    request_path.write_bytes(canonical_json(request))
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(REMOTE_REPO / "src/distill_lab/modal_validation_worker.py"),
+            str(request_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=3_500,
+    )
+    result = _OBJECT.validate_python(json.loads(process.stdout))
+    result_path.write_bytes(canonical_json(result))
+    result_volume.commit()
+    return result
+
+
 @app.local_entrypoint()
 def main(
     study: str = "experiments/pinapple-sft.json",
@@ -273,6 +334,10 @@ def main(
     stop_after_updates: int | None = None,
     resume_completed_updates: int | None = None,
     candidate_state_out: str | None = None,
+    phase_one_source_run: str | None = None,
+    phase_one_source_tag: str | None = None,
+    phase_one_iteration: int = 1,
+    phase_one_starting_loss: float | None = None,
 ) -> None:
     if candidate_state_out is not None:
         state = prepare_candidate_state.remote(
@@ -290,6 +355,22 @@ def main(
     if run.source.budget.training_updates < 1:
         raise ValueError("Modal training requires at least one update")
     data = (LOCAL_REPO / training_data).read_text()
+    if phase_one_source_run is not None:
+        if phase_one_source_tag is None or phase_one_starting_loss is None:
+            raise ValueError("phase-one validation requires source tag and starting loss")
+        rows = [line for line in data.splitlines() if line.strip()]
+        if len(rows) != 1:
+            raise ValueError("phase-one validation requires exactly one training row")
+        result = validate_phase_one.remote(
+            run.model_dump_json(),
+            phase_one_source_run,
+            phase_one_source_tag,
+            phase_one_iteration,
+            rows[0],
+            phase_one_starting_loss,
+        )
+        print(json.dumps(result, indent=2))
+        return
     result = train.remote(
         run.model_dump_json(),
         data,
