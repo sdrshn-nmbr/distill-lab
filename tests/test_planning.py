@@ -18,7 +18,7 @@ def test_miles_revision_must_be_an_exact_commit(tmp_path: Path, revision: str) -
     path = tmp_path / "study.json"
     path.write_text(json.dumps(value))
 
-    with pytest.raises(ValidationError, match="exact 40-character commit"):
+    with pytest.raises(ValidationError, match="String should match pattern"):
         load_study(path)
 
 
@@ -40,3 +40,33 @@ def test_credentials_fail_before_validation(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="must not contain credentials"):
         load_study(path)
+
+
+@pytest.mark.parametrize(
+    "repository",
+    [
+        "https://token@example.com/miles.git",
+        "https://example.com/miles.git?token=value",
+        "https://example.com/miles.git#secret",
+        "http://example.com/miles.git",
+    ],
+)
+def test_miles_repository_rejects_credential_surfaces(tmp_path: Path, repository: str) -> None:
+    value = _minimal()
+    value["miles"]["repository"] = repository  # type: ignore[index]
+    path = tmp_path / "study.json"
+    path.write_text(json.dumps(value))
+
+    with pytest.raises(ValidationError, match="without credentials, query, or fragment"):
+        load_study(path)
+
+
+def test_trace_only_fields_do_not_change_teacher_cache_namespace(tmp_path: Path) -> None:
+    from distill_lab.planning import resolve_study
+
+    source = load_study(Path("experiments/fixtures/minimal.json"))
+    first = resolve_study(source)
+    second = resolve_study(source.model_copy(update={"name": "another-trace-name", "seed": 73}))
+
+    assert first.run_id != second.run_id
+    assert first.components.teacher_cache_namespace == second.components.teacher_cache_namespace

@@ -2,6 +2,7 @@ import hashlib
 import os
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from distill_lab.contracts import ArtifactRef
 
@@ -15,10 +16,19 @@ class LocalArtifactStore:
         self._root = root
 
     def put_bytes(
-        self, payload: bytes, media_type: str = "application/octet-stream"
+        self,
+        payload: bytes,
+        *,
+        media_type: str,
+        sensitivity: Literal["public", "private"],
     ) -> ArtifactRef:
         digest = hashlib.sha256(payload).hexdigest()
-        ref = ArtifactRef(sha256=digest, size_bytes=len(payload), media_type=media_type)
+        ref = ArtifactRef(
+            sha256=digest,
+            size_bytes=len(payload),
+            media_type=media_type,
+            sensitivity=sensitivity,
+        )
         destination = self.path_for(ref)
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")

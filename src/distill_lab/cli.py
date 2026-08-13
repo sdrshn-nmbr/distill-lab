@@ -3,6 +3,8 @@ from typing import Annotated
 
 import typer
 
+from distill_lab.canonical import canonical_json
+from distill_lab.contracts import StudySpec
 from distill_lab.planning import load_study, resolve_study, write_resolved_run
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
@@ -19,6 +21,13 @@ def plan(source: Path, out: Annotated[Path, typer.Option("--out")]) -> None:
     run = resolve_study(load_study(source))
     write_resolved_run(run, out)
     typer.echo(run.run_id)
+
+
+@app.command()
+def schema(out: Annotated[Path, typer.Option("--out")]) -> None:
+    """Write the JSON schema for experiment files."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(canonical_json(StudySpec.model_json_schema()))
 
 
 if __name__ == "__main__":

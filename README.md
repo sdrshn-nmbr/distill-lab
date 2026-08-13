@@ -15,7 +15,13 @@ The project stores every input and result with a stable hash. It calls Miles as 
 - Added strict plan types. Moving Git refs, unknown fields, and credentials now fail.
 - Added an immutable local artifact store. Concurrent writers make one verified object.
 - Ran 256 request-order simulations. They found a broken drain path for requests that were already running. Seeds 75, 98, and 136 now keep that bug fixed.
+- Ran a full plan review before adding the teacher gateway. The review found missing run facts, weak URL checks, and an overclaim in the first simulator. The gateway work stopped before it was committed.
+- Expanded the experiment file so it owns data, prompt, teacher, tokenizer, training, Miles image, evaluation, storage, gateway, budget, and observation settings.
+- Added one generated JSON schema and a check that fails when it is stale.
+- Added private and public artifact labels. Credentials are never valid artifact data.
+- Added virtual-time abort cleanup and a test that proves the duplicate-flight check can fail.
+- Added CI for the lock file, tests, strict types, formatting, schema drift, compilation, and Git history secret scanning.
 
 ## Current proof
 
-No training result exists yet. Planning, artifact storage, and the request-state model pass 268 tests. Real process shutdown, network behavior, and training are not covered yet.
+No training result exists yet. Planning, artifact storage, and the request-state model pass 276 tests and strict type checks. Real process shutdown, network behavior, and training are not covered yet.

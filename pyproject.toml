@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A reproducible lab for text and token-choice distillation with Codex and Miles."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 dependencies = [
     "pydantic>=2.11,<3",
     "typer>=0.16,<1",
@@ -15,6 +15,7 @@ distill-lab = "distill_lab.cli:app"
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.403,<2",
     "pytest>=8.4,<9",
     "pytest-asyncio>=1.1,<2",
     "pytest-cov>=6.2,<7",
@@ -39,3 +40,8 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"

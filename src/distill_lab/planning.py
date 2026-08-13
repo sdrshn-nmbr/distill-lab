@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from distill_lab.canonical import canonical_json, content_hash
-from distill_lab.contracts import ResolvedRun, StudySpec
+from distill_lab.contracts import ResolvedComponents, ResolvedRun, StudySpec
 
 _SECRET_PATTERNS = (
     re.compile(r"tskey-(?:auth|client)-[A-Za-z0-9_-]+"),
@@ -22,7 +22,17 @@ def load_study(path: Path) -> StudySpec:
 def resolve_study(study: StudySpec) -> ResolvedRun:
     source = study.model_dump(mode="json")
     run_id = f"run_{content_hash(source)[:16]}"
-    return ResolvedRun(run_id=run_id, source=study)
+    teacher_identity = {
+        "teacher": source["teacher"],
+        "method": source["method"],
+        "prompts": source["prompts"],
+    }
+    components = ResolvedComponents(
+        teacher_cache_namespace=f"teacher_{content_hash(teacher_identity)[:16]}",
+        miles_command=("uv", "run", "--no-project", "python", "train_async.py"),
+        artifact_namespace=run_id,
+    )
+    return ResolvedRun(run_id=run_id, source=study, components=components)
 
 
 def write_resolved_run(run: ResolvedRun, path: Path) -> None:

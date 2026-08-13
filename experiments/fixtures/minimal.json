@@ -3,24 +3,85 @@
   "seed": 42,
   "method": {
     "kind": "complete_response",
-    "privileged_context": true
+    "privileged_context": true,
+    "method_version": "complete-response-v1",
+    "output_schema_version": "teacher-text-v1"
+  },
+  "prompts": {
+    "public_template": "pinapple-public",
+    "public_version": "v1",
+    "privileged_template": "pinapple-privileged",
+    "privileged_version": "v1"
+  },
+  "dataset": {
+    "repository": "distill-lab/fixtures",
+    "revision": "1111111111111111111111111111111111111111",
+    "configuration": "pinapple",
+    "split": "train",
+    "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
   },
   "teacher": {
     "kind": "codex_app_server",
-    "model": "gpt-5.6",
-    "max_turns": 1
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "low",
+    "codex_cli_version": "0.146.0"
   },
   "student": {
     "model": "Qwen/Qwen3.5-4B",
-    "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+    "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "tokenizer_revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "chat_template_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "thinking_mode": false
+  },
+  "training": {
+    "backend": "fsdp",
+    "learning_rate": 0.000001,
+    "global_batch_size": 1,
+    "micro_batch_size": 1,
+    "max_response_tokens": 128,
+    "target_token_budget": 128,
+    "checkpoint_interval": 1
   },
   "miles": {
     "repository": "https://github.com/sdrshn-nmbr/miles.git",
-    "revision": "4b1974cfd656a484d457c7abf3d25bc8380cab5a"
+    "revision": "4b1974cfd656a484d457c7abf3d25bc8380cab5a",
+    "image": "example.invalid/distill-lab/miles@sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "evaluation": {
+    "kind": "exact_match",
+    "definition_version": "pinapple-v1",
+    "dataset_revision": "4444444444444444444444444444444444444444",
+    "evaluator_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "artifacts": {
+    "kind": "local",
+    "root": "artifacts"
+  },
+  "gateway": {
+    "listen_host": "127.0.0.1",
+    "port": 8765,
+    "bearer_token": {
+      "kind": "environment",
+      "name": "DISTILL_LAB_GATEWAY_TOKEN"
+    },
+    "request_timeout_seconds": 180.0,
+    "cache_path": "artifacts/gateway.sqlite3"
+  },
+  "execution": {
+    "kind": "local"
   },
   "budget": {
-    "teacher_requests": 1,
+    "teacher_turns": 1,
+    "teacher_items": 1,
+    "output_tokens": 512,
+    "retries": 1,
+    "concurrency": 1,
     "training_updates": 1
+  },
+  "observability": {
+    "gpu_sample_interval_seconds": 1.0,
+    "record_process_tree": true,
+    "record_network_endpoints": true,
+    "profile": "none"
   }
 }
-
