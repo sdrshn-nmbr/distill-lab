@@ -39,6 +39,9 @@ The project stores every input and result with a stable hash. It calls Miles as 
 - A live Qwen forward pass produced two exact first-token candidates. Codex chose token `31243` (`Adding`) in one turn with zero retries. The immutable Miles row keeps all 27 Qwen token IDs and masks only the selected token.
 - Real Miles startup found two false assumptions that local tensor tests missed. The global dataset is already the default, and Qwen3.5 data must enter Miles as chat messages because the model has a processor. Neither fix changes or retokenizes the exact target IDs.
 - Added private, credential-scanned failure evidence. Public Modal errors remain redacted, while a failed attempt now points to a private diagnostic artifact by hash.
+- Compared one Miles update with a plain Hugging Face update from the same Qwen checkpoint, tokens, mask, and optimizer settings. Both training methods changed the selected parameters and moved the target probabilities in the same direction.
+- Proved three-row resume order. Continuous and interrupted runs both consumed `resume-a`, `resume-b`, then `resume-c`. Their final model, optimizer, scheduler, random-number, and dataset states matched within declared tolerances.
+- Completed a second exact-token round from `iter_0000001`. The harness verified the state-parent checkpoint chain and rejected stale lineage. A stale-state control produced an almost identical child because both rounds selected the same target token.
 
 ## Current proof
 
@@ -46,4 +49,10 @@ The full-answer path trained Qwen3.5-4B on one H200 through pinned Miles. Update
 
 The exact-token path also completed two Qwen3.5-4B updates on one H200. Codex selected `Adding` from exact Qwen candidates `You` and `Adding`. Miles saw one response token in a 27-token sequence. Update one had loss `1.4080` and gradient norm `724.21`; update two loaded `iter_0000001`, had loss `0.5878` and gradient norm `408.50`, and wrote `iter_0000002`. The changed pre-update token loss after reload is functional evidence that the first checkpoint changed the model's behavior on the target state.
 
-These are mechanism proofs on one training row. They prove the typed teacher handoff, exact-token mask, nonzero optimization, checkpoint-component reload, and continued training. They do not prove held-out quality or that a larger dataset resumes without skipping or repeating a row. Tailscale is not needed for immutable offline training and has not been used by this project.
+For both methods, a plain Hugging Face update and the Miles update started from the same Qwen checkpoint and used the same target. The full-answer target probability rose from `0.0109` to about `0.0152` in both paths. The exact-token target probability rose from about `0.244` to about `0.556`. Their losses and update direction agree closely.
+
+A separate three-row test proved restart order. Continuous and interrupted training both consumed `resume-a`, `resume-b`, then `resume-c`. Scheduler, random-number, and dataset state hashes matched exactly. The final model differed by at most `5.79e-6`, the optimizer by `3.39e-4`, and fixed-input loss by `0.00559`, all within the declared tolerances.
+
+The refreshed exact-token loop now spans two rounds. Round two generated candidates from the semantic model hash of round one's checkpoint, asked Codex once, trained from that same parent, and wrote a new checkpoint. The candidate ranking changed, but Codex again chose `Adding`. A stale-state control therefore used the same target tokens and mask. The child models differed by only `1.58e-6`; this round does not show a benefit from refreshing the state.
+
+These remain small mechanism and correctness proofs. They do not prove held-out quality, general capability improvement, convergence, consistent results across random seeds, or that either teaching method is better. Tailscale is not needed for immutable offline training and has not been used by this project.
