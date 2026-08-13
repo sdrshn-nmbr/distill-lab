@@ -208,7 +208,7 @@ class CodexAppServerBackend:
                 item_type = item.get("type")
                 if item_type == "agentMessage" and isinstance(item.get("text"), str):
                     final_text = item["text"]
-                elif item_type not in {"reasoning"}:
+                elif item_type not in {"plan", "reasoning"}:
                     raise TeacherTransportError("Codex app-server emitted a forbidden item")
             elif method == "thread/tokenUsage/updated" and params.get("turnId") == turn_id:
                 usage = _object(params.get("tokenUsage"), "token usage")
