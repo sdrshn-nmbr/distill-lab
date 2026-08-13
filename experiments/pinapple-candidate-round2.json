@@ -1,0 +1,93 @@
+{
+  "name": "pinapple-refreshed-candidate-round2",
+  "seed": 42,
+  "method": {
+    "kind": "candidate_token",
+    "method_version": "candidate-token-v1",
+    "output_schema_version": "selected-token-v1",
+    "candidates": 2,
+    "positions": 1
+  },
+  "prompts": {
+    "public_template": "candidate-token",
+    "public_version": "v1",
+    "privileged_template": null,
+    "privileged_version": null
+  },
+  "dataset": {
+    "kind": "local",
+    "path": "datasets/live/pinapple_candidate_state_round2.jsonl",
+    "configuration": "pinapple-refreshed-qwen-state",
+    "split": "train",
+    "content_sha256": "3232efc5b6fa2fc583e325c6b15c25998522d16276172c82658e47fccf47a512"
+  },
+  "teacher": {
+    "kind": "codex_app_server",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "low",
+    "codex_cli_version": "0.147.0-alpha.6.5",
+    "executable": "/Applications/Codex.app/Contents/Resources/codex",
+    "executable_sha256": "04ddea2f332bd524bf6cc02f8efcf45f0afa0c7d9b97d77aaef7bb84adf3d4c5"
+  },
+  "student": {
+    "model": "Qwen/Qwen3.5-4B",
+    "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "tokenizer_revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "chat_template_sha256": "a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715",
+    "thinking_mode": false
+  },
+  "training": {
+    "backend": "fsdp",
+    "learning_rate": 0.000001,
+    "global_batch_size": 1,
+    "micro_batch_size": 1,
+    "max_response_tokens": 128,
+    "max_sequence_tokens": 4096,
+    "checkpoint_interval": 1,
+    "timeout_seconds": 7200,
+    "shuffle": false,
+    "deterministic": true
+  },
+  "miles": {
+    "repository": "https://github.com/sdrshn-nmbr/miles.git",
+    "revision": "92a7bc0434b65bb96cf221014916986edcfc1064",
+    "source_sha256": "d545fb5ef8e83d838818a11ac02dfde96c5582c39679f5eaae9ee673957ad1d9",
+    "image": "radixark/miles@sha256:1594af286e00a2a937c1ccf446b840af59cc59937d487b79ec2de2d778eae6f1"
+  },
+  "evaluation": {
+    "kind": "contains",
+    "definition_version": "pinapple-v1",
+    "evaluator_sha256": "6d90316fe64c648c7ab31f72b15cd4acddbd1170acf9d40cf6a4c830e116e027"
+  },
+  "artifacts": {
+    "kind": "local",
+    "root": "artifacts/live-candidate-round2"
+  },
+  "gateway": {
+    "listen_host": "127.0.0.1",
+    "port": 8765,
+    "bearer_token": {
+      "kind": "environment",
+      "name": "DISTILL_LAB_GATEWAY_TOKEN"
+    },
+    "request_timeout_seconds": 180.0,
+    "cache_path": "artifacts/live-candidate-round2/gateway.sqlite3"
+  },
+  "execution": {
+    "kind": "local"
+  },
+  "budget": {
+    "teacher_turns": 1,
+    "teacher_items": 1,
+    "observed_output_token_limit": 128,
+    "retries": 0,
+    "concurrency": 1,
+    "training_updates": 2
+  },
+  "observability": {
+    "gpu_sample_interval_seconds": 1.0,
+    "record_process_tree": true,
+    "record_network_endpoints": true,
+    "profile": "none"
+  }
+}
