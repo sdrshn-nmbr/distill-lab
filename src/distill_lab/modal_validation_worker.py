@@ -9,6 +9,7 @@ from typing import override
 
 import torch
 import torch.distributed.checkpoint as dcp
+from miles.backends.fsdp_utils.models.qwen3_5 import apply_gateddeltanet_packing_patch
 from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE, Metadata, TensorStorageMetadata
 from transformers import AutoModelForImageTextToText, AutoTokenizer
@@ -97,21 +98,27 @@ def observe(
     model: torch.nn.Module,
     token_ids: list[int],
     response_length: int,
+    *,
+    padded_length: int | None = None,
 ) -> TrainingObservation:
     inputs = torch.tensor([token_ids], device="cuda")
-    position_ids = torch.arange(len(token_ids), device="cuda").unsqueeze(0)
+    position_ids = torch.arange(len(token_ids), device="cuda")
+    if padded_length is not None:
+        padding = padded_length - len(token_ids)
+        if padding < 0:
+            raise ValueError("padded length is shorter than the token sequence")
+        inputs = torch.nn.functional.pad(inputs, (0, padding))
+        position_ids = torch.nn.functional.pad(position_ids, (0, padding))
+    position_ids = position_ids.unsqueeze(0)
     start = len(token_ids) - response_length
-    logits = (
-        model(
-            input_ids=inputs,
-            position_ids=position_ids,
-            attention_mask=None,
-            use_cache=False,
-        )
-        .logits[:, start - 1 : -1]
-        .float()
-    )
-    targets = inputs[:, start:]
+    full_logits = model(
+        input_ids=inputs,
+        position_ids=position_ids,
+        attention_mask=None,
+        use_cache=False,
+    ).logits.float()
+    logits = full_logits[:, start - 1 : start - 1 + response_length]
+    targets = inputs[:, start : start + response_length]
     loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), targets.flatten())
     state = model.state_dict()
     return TrainingObservation(
@@ -164,10 +171,19 @@ def phase_one(spec: dict[str, object]) -> PhaseOneEvidence | TrainingObservation
     learning_rate = float(spec["learning_rate"])  # type: ignore[arg-type]
     miles_starting_loss = float(spec["miles_starting_loss"])  # type: ignore[arg-type]
 
+    if spec.get("packing_patch") is True:
+        apply_gateddeltanet_packing_patch()
     base = load_model(base_path)
     base.eval()
     with torch.inference_mode():
-        hugging_face_before = observe(base, token_ids, response_length)
+        hugging_face_before = observe(
+            base,
+            token_ids,
+            response_length,
+            padded_length=(
+                int(spec["padded_length"]) if spec.get("padded_length") is not None else None
+            ),
+        )
     print(
         json.dumps({"stage": "hugging_face_before", **hugging_face_before.model_dump()}),
         file=sys.stderr,

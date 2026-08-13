@@ -281,6 +281,8 @@ def validate_phase_one(
     training_row: str,
     miles_starting_loss: float,
     preflight_only: bool = False,
+    padded_length: int | None = None,
+    packing_patch: bool = False,
 ) -> dict[str, Any]:
     run = ResolvedRun.model_validate_json(resolved_run_json)
     _verify_packaged_harness(run)
@@ -296,6 +298,8 @@ def validate_phase_one(
         "learning_rate": run.source.training.learning_rate,
         "miles_starting_loss": miles_starting_loss,
         "preflight_only": preflight_only,
+        "padded_length": padded_length,
+        "packing_patch": packing_patch,
     }
     if isinstance(run.source.method, CandidateTokenMethod):
         if not isinstance(metadata, dict):
@@ -352,6 +356,8 @@ def main(
     phase_one_iteration: int = 1,
     phase_one_starting_loss: float | None = None,
     phase_one_preflight_only: bool = False,
+    phase_one_padded_length: int | None = None,
+    phase_one_packing_patch: bool = False,
 ) -> None:
     if candidate_state_out is not None:
         state = prepare_candidate_state.remote(
@@ -383,6 +389,8 @@ def main(
             rows[0],
             phase_one_starting_loss,
             phase_one_preflight_only,
+            phase_one_padded_length,
+            phase_one_packing_patch,
         )
         print(json.dumps(result, indent=2))
         return
