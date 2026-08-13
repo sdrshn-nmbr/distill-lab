@@ -528,10 +528,11 @@ def validate_resume(
             name="resumed",
         ),
     }
-    differences = _compare_resume_states(
+    differences = _compare_checkpoint_states(
         continuous_dir / "checkpoints/iter_0000003",
         resumed_dir / "checkpoints/iter_0000003",
         validation_dir,
+        comparison_name="resume",
     )
     evidence = ResumeEvidence(
         loss_tolerance=0.02,
@@ -574,6 +575,12 @@ def validate_refresh(
     round_one_sha256 = _checkpoint_model_sha256(round_one_checkpoint, validation_dir / "round1")
     refreshed_sha256 = _checkpoint_model_sha256(refreshed_checkpoint, validation_dir / "refreshed")
     stale_sha256 = _checkpoint_model_sha256(stale_checkpoint, validation_dir / "stale")
+    differences = _compare_checkpoint_states(
+        refreshed_checkpoint,
+        stale_checkpoint,
+        validation_dir,
+        comparison_name="refresh-branches",
+    )
     evidence = RefreshEvidence(
         refreshed=(
             RefreshRound(
@@ -592,6 +599,8 @@ def validate_refresh(
         stale_control_state_checkpoint_sha256=base_checkpoint_sha256,
         stale_control_parent_checkpoint_sha256=round_one_sha256,
         stale_control_result_checkpoint_sha256=stale_sha256,
+        branch_model_max_abs_difference=differences["model_max_abs_difference"],
+        branch_optimizer_max_abs_difference=differences["optimizer_max_abs_difference"],
     )
     destination = validation_dir / "refresh-lineage.json"
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -600,18 +609,20 @@ def validate_refresh(
     return evidence.model_dump(mode="json")
 
 
-def _compare_resume_states(
-    continuous_checkpoint: Path,
-    resumed_checkpoint: Path,
+def _compare_checkpoint_states(
+    first_checkpoint: Path,
+    second_checkpoint: Path,
     validation_dir: Path,
+    *,
+    comparison_name: str,
 ) -> dict[str, float]:
-    request_path = validation_dir / "resume-state-comparison-request.json"
+    request_path = validation_dir / f"{comparison_name}-state-comparison-request.json"
     request_path.write_bytes(
         canonical_json(
             {
                 "operation": "state_max_abs_difference",
-                "continuous_checkpoint": str(continuous_checkpoint),
-                "resumed_checkpoint": str(resumed_checkpoint),
+                "continuous_checkpoint": str(first_checkpoint),
+                "resumed_checkpoint": str(second_checkpoint),
             }
         )
     )

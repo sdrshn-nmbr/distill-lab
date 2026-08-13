@@ -147,6 +147,8 @@ def test_refresh_requires_each_state_to_match_its_parent_checkpoint() -> None:
         stale_control_state_checkpoint_sha256=base,
         stale_control_parent_checkpoint_sha256=first,
         stale_control_result_checkpoint_sha256="d" * 64,
+        branch_model_max_abs_difference=0.0,
+        branch_optimizer_max_abs_difference=0.0,
     )
 
     assert evidence.refreshed[-1].result_checkpoint_sha256 == second
@@ -159,4 +161,31 @@ def test_refresh_requires_each_state_to_match_its_parent_checkpoint() -> None:
             stale_control_state_checkpoint_sha256=base,
             stale_control_parent_checkpoint_sha256=first,
             stale_control_result_checkpoint_sha256="d" * 64,
+            branch_model_max_abs_difference=0.0,
+            branch_optimizer_max_abs_difference=0.0,
+        )
+
+
+def test_refresh_rejects_negative_branch_difference() -> None:
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        RefreshEvidence(
+            refreshed=(
+                RefreshRound(
+                    round=1,
+                    parent_checkpoint_sha256="a" * 64,
+                    state_checkpoint_sha256="a" * 64,
+                    result_checkpoint_sha256="b" * 64,
+                ),
+                RefreshRound(
+                    round=2,
+                    parent_checkpoint_sha256="b" * 64,
+                    state_checkpoint_sha256="b" * 64,
+                    result_checkpoint_sha256="c" * 64,
+                ),
+            ),
+            stale_control_state_checkpoint_sha256="a" * 64,
+            stale_control_parent_checkpoint_sha256="b" * 64,
+            stale_control_result_checkpoint_sha256="d" * 64,
+            branch_model_max_abs_difference=-1.0,
+            branch_optimizer_max_abs_difference=0.0,
         )

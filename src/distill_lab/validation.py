@@ -157,6 +157,8 @@ class RefreshEvidence(StrictModel):
     stale_control_state_checkpoint_sha256: Digest
     stale_control_parent_checkpoint_sha256: Digest
     stale_control_result_checkpoint_sha256: Digest
+    branch_model_max_abs_difference: float = Field(ge=0)
+    branch_optimizer_max_abs_difference: float = Field(ge=0)
 
     @model_validator(mode="after")
     def proves_refresh_and_control(self) -> RefreshEvidence:
