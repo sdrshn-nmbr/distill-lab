@@ -64,7 +64,7 @@ def test_candidate_manifest_materializes_exact_tokens_and_one_target(tmp_path: P
             "checkpoint_sha256": "5" * 64,
             "prompt_token_ids": [100, 101],
             "student_token_ids": [200, 201],
-            "position": 1,
+            "position": 2,
         },
         "teacher_output": {"selected_token_id": 10, "output_tokens": 2},
     }

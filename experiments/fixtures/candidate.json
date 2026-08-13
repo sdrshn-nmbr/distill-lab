@@ -19,7 +19,7 @@
     "revision": "1111111111111111111111111111111111111111",
     "configuration": "pinapple-candidate-states",
     "split": "train",
-    "content_sha256": "007dfd740980fcc600c921642a7b66036111d44cee61b8d24f6f838513e96e8c"
+    "content_sha256": "896345cf7004caf858a4731f2a9da8fc8214a7097f0b3876ae98c2b7939a9cbf"
   },
   "teacher": {
     "kind": "codex_app_server",

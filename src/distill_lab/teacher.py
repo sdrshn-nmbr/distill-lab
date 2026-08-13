@@ -53,6 +53,8 @@ class TokenSelectionRequest(StrictModel):
             raise ValueError("candidate token IDs must be unique")
         if ranks != list(range(len(ranks))):
             raise ValueError("candidate ranks must be contiguous and start at zero")
+        if self.position != len(self.student_token_ids):
+            raise ValueError("position must equal the student prefix length")
         return self
 
 

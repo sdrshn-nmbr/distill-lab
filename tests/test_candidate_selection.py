@@ -3,12 +3,16 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from distill_lab.artifacts import LocalArtifactStore
 from distill_lab.candidate_selection import load_candidate_states, run_candidate_selection
 from distill_lab.contracts import ArtifactRef
 from distill_lab.gateway import GatewayService
 from distill_lab.planning import load_study, resolve_study
 from distill_lab.teacher import (
+    CandidateToken,
     GenerationRequest,
     TeacherGeneration,
     TeacherSelection,
@@ -37,6 +41,23 @@ class FakeBackend:
 
     async def close(self) -> None:
         return None
+
+
+def test_position_must_equal_the_student_prefix_length() -> None:
+    with pytest.raises(ValidationError, match="student prefix length"):
+        TokenSelectionRequest(
+            request_id="bad",
+            checkpoint_sha256="5" * 64,
+            prompt="What fruit?",
+            student_prefix="Add pin",
+            prompt_token_ids=[100],
+            student_token_ids=[200, 201],
+            position=1,
+            candidates=[
+                CandidateToken(token_id=10, text="apple", rank=0),
+                CandidateToken(token_id=11, text=" salt", rank=1),
+            ],
+        )
 
 
 async def test_candidate_selection_writes_exact_student_token_target(tmp_path: Path) -> None:

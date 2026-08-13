@@ -30,6 +30,7 @@ The project stores every input and result with a stable hash. It calls Miles as 
 - Added Codex selection of exact student token IDs. A request includes the checkpoint hash, Qwen prefix IDs, position, ranked Qwen candidates, and decoded candidate text. Codex can choose one listed ID or abstain.
 - Added the Miles boundary. Full answers become standard `messages` data for Miles SFT. Token choices keep the full Qwen prefix and a loss mask with one target position. The target is never converted to text and retokenized.
 - The Miles launcher refuses a dirty checkout or the wrong commit. Teacher, Tailnet, and gateway credentials are removed from the training process environment.
+- Fixed the candidate-state position contract before GPU work. The next-token position must equal the number of student response tokens already in the prefix.
 
 ## Current proof
 
