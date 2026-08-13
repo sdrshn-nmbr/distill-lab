@@ -15,6 +15,12 @@ from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE, Metadata, Ten
 from transformers import AutoModelForImageTextToText, AutoTokenizer
 
 from distill_lab.checkpoint_evidence import semantic_digest
+from distill_lab.quality import (
+    QualityExample,
+    QualityObservation,
+    QualityStudyEvidence,
+    aggregate_quality,
+)
 from distill_lab.validation import (
     CheckpointIdentity,
     PhaseOneEvidence,
@@ -378,6 +384,96 @@ def state_max_abs_difference(spec: dict[str, object]) -> dict[str, float]:
     }
 
 
+def quality_study(spec: dict[str, object]) -> QualityStudyEvidence:
+    base_path = Path(str(spec["base_path"]))
+    dataset_sha256 = str(spec["dataset_sha256"])
+    examples = tuple(
+        QualityExample.model_validate(value)
+        for value in spec["examples"]  # type: ignore[union-attr]
+    )
+    checkpoint_values = spec["checkpoints"]
+    if not isinstance(checkpoint_values, list) or not checkpoint_values:
+        raise ValueError("quality study requires checkpoints")
+    checkpoints = tuple(
+        (str(value["name"]), Path(str(value["path"])))  # type: ignore[index]
+        for value in checkpoint_values
+    )
+    results = []
+    for name, checkpoint in (("base", None), *checkpoints):
+        print(json.dumps({"stage": "quality_load", "checkpoint": name}), flush=True)
+        model = load_model(base_path, checkpoint)
+        model.eval()
+        tokenizer = AutoTokenizer.from_pretrained(base_path, local_files_only=True)
+        observations = tuple(
+            _quality_observation(model, tokenizer, example) for example in examples
+        )
+        results.append(aggregate_quality(examples, observations, checkpoint=name))
+        print(
+            json.dumps(
+                {
+                    "stage": "quality_complete",
+                    "checkpoint": name,
+                    "heldout_success_rate": results[-1].heldout.success_rate,
+                    "control_success_rate": results[-1].control.success_rate,
+                }
+            ),
+            flush=True,
+        )
+        del model
+        torch.cuda.empty_cache()
+    return QualityStudyEvidence(
+        dataset_sha256=dataset_sha256,
+        base=results[0],
+        checkpoints=tuple(results[1:]),
+    )
+
+
+def _quality_observation(
+    model: torch.nn.Module,
+    tokenizer: AutoTokenizer,
+    example: QualityExample,
+) -> QualityObservation:
+    prompt_ids = tokenizer.apply_chat_template(
+        [{"role": "user", "content": example.prompt}],
+        tokenize=True,
+        add_generation_prompt=True,
+        enable_thinking=False,
+    )
+    if not isinstance(prompt_ids, list) or not prompt_ids:
+        raise ValueError("quality prompt did not produce token IDs")
+    target_ids = tokenizer.encode(example.target_response, add_special_tokens=False)
+    if not target_ids:
+        raise ValueError("quality target did not produce token IDs")
+    input_ids = torch.tensor([prompt_ids], device="cuda")
+    attention_mask = torch.ones_like(input_ids)
+    max_new_tokens = 32
+    with torch.inference_mode():
+        generated = model.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            do_sample=False,
+            max_new_tokens=max_new_tokens,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+        target = observe(model, prompt_ids + target_ids, len(target_ids))
+    response_ids = generated[0, len(prompt_ids) :].tolist()
+    generated_text = tokenizer.decode(response_ids, skip_special_tokens=True).strip()
+    lowered = generated_text.casefold()
+    success = example.expected_contains.casefold() in lowered
+    if example.forbidden_contains is not None:
+        success = success and example.forbidden_contains.casefold() not in lowered
+    eos = tokenizer.eos_token_id
+    truncated = len(response_ids) == max_new_tokens and (eos is None or response_ids[-1] != eos)
+    return QualityObservation(
+        example_id=example.example_id,
+        generated_text=generated_text,
+        success=success,
+        target_probability=target.target_probability,
+        response_tokens=len(response_ids),
+        truncated=truncated,
+    )
+
+
 def _max_abs_difference(left: object, right: object, *, path: str = "state") -> float:
     if isinstance(left, torch.Tensor) and isinstance(right, torch.Tensor):
         if left.dtype != right.dtype or left.shape != right.shape:
@@ -421,6 +517,8 @@ if __name__ == "__main__":
     elif operation == "state_max_abs_difference":
         print(json.dumps(state_max_abs_difference(request), separators=(",", ":")))
         raise SystemExit(0)
+    elif operation == "quality_study":
+        result = quality_study(request)
     else:
         raise ValueError(f"unknown validation operation: {operation}")
     print(result.model_dump_json())

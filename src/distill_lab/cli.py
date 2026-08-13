@@ -15,6 +15,7 @@ from distill_lab.candidate_selection import (
 from distill_lab.canonical import canonical_json
 from distill_lab.complete_response import CompleteResponseArtifacts, run_complete_response
 from distill_lab.contracts import (
+    ArtifactRef,
     CompleteResponseMethod,
     LocalArtifactStoreSpec,
     StudySpec,
@@ -22,6 +23,7 @@ from distill_lab.contracts import (
 from distill_lab.dataset import load_examples
 from distill_lab.factories import build_teacher_backend
 from distill_lab.gateway import GatewayService, create_app
+from distill_lab.miles_adapter import materialize_sft_training_data
 from distill_lab.planning import (
     load_study,
     require_clean_harness,
@@ -52,6 +54,34 @@ def schema(out: Annotated[Path, typer.Option("--out")]) -> None:
     """Write the JSON schema for experiment files."""
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(canonical_json(StudySpec.model_json_schema()))
+
+
+@app.command("materialize-sft")
+def materialize_sft(
+    source: Path,
+    manifest_sha256: Annotated[str, typer.Option("--manifest-sha256")],
+    out: Annotated[Path, typer.Option("--out")],
+) -> None:
+    """Turn an accepted complete-response manifest into Miles SFT data."""
+    run = resolve_study(load_study(source))
+    require_clean_harness(run)
+    if not isinstance(run.source.artifacts, LocalArtifactStoreSpec):
+        raise ValueError("SFT materialization requires a local artifact store")
+    artifact_root = Path(run.source.artifacts.root)
+    manifest_path = (
+        artifact_root / "public" / "objects" / manifest_sha256[:2] / f"{manifest_sha256}.blob"
+    )
+    output = materialize_sft_training_data(
+        store=LocalArtifactStore(artifact_root),
+        manifest=ArtifactRef(
+            sha256=manifest_sha256,
+            size_bytes=manifest_path.stat().st_size,
+            media_type="application/json",
+            sensitivity="public",
+        ),
+        output=out,
+    )
+    typer.echo(output)
 
 
 @app.command()

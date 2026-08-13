@@ -151,6 +151,16 @@ class EvaluationSpec(StrictModel):
     kind: Literal["contains", "deep_swe"]
     definition_version: str = Field(min_length=1)
     evaluator_sha256: Digest
+    quality_dataset_path: str | None = Field(
+        default=None, pattern=r"^[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)*$"
+    )
+    quality_dataset_sha256: Digest | None = None
+
+    @model_validator(mode="after")
+    def quality_dataset_is_complete(self) -> EvaluationSpec:
+        if (self.quality_dataset_path is None) != (self.quality_dataset_sha256 is None):
+            raise ValueError("quality dataset path and digest must be set together")
+        return self
 
 
 class LocalArtifactStoreSpec(StrictModel):

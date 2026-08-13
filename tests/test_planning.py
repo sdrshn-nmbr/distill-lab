@@ -86,3 +86,13 @@ def test_dirty_harness_cannot_execute_externally() -> None:
 
     with pytest.raises(ValueError, match="must be clean"):
         require_clean_harness(dirty)
+
+
+def test_quality_evaluation_dataset_path_and_digest_are_atomic(tmp_path: Path) -> None:
+    value = _minimal()
+    value["evaluation"]["quality_dataset_path"] = "datasets/quality.jsonl"  # type: ignore[index]
+    path = tmp_path / "study.json"
+    path.write_text(json.dumps(value))
+
+    with pytest.raises(ValidationError, match="quality dataset path and digest"):
+        load_study(path)

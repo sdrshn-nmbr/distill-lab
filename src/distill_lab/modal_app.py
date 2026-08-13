@@ -26,6 +26,7 @@ from distill_lab.miles_adapter import (
     verify_miles_checkout,
 )
 from distill_lab.planning import load_study, require_clean_harness, resolve_study
+from distill_lab.quality import QualityExample, QualityStudyEvidence
 from distill_lab.receipts import AttemptRecorder, failure_code
 from distill_lab.security import reject_credentials
 from distill_lab.validation import RefreshEvidence, RefreshRound, ResumeEvidence, RunState
@@ -609,6 +610,85 @@ def validate_refresh(
     return evidence.model_dump(mode="json")
 
 
+@modal_function(
+    image=image,
+    gpu="H200:1",
+    cpu=8,
+    memory=65_536,
+    timeout=7_200,
+    volumes={"/root/models": model_volume, str(RESULT_ROOT): result_volume},
+)
+def validate_quality(
+    resolved_run_json: str,
+    source_run: str,
+    source_tag: str,
+    quality_data: str,
+    quality_data_sha256: str,
+) -> dict[str, Any]:
+    run = ResolvedRun.model_validate_json(resolved_run_json)
+    _verify_packaged_harness(run)
+    if hashlib.sha256(quality_data.encode()).hexdigest() != quality_data_sha256:
+        raise ValueError("quality dataset digest mismatch")
+    examples = tuple(
+        QualityExample.model_validate_json(line)
+        for line in quality_data.splitlines()
+        if line.strip()
+    )
+    run_dir = RESULT_ROOT / source_run / source_tag
+    checkpoints = tuple(
+        (
+            f"iter_{iteration:07d}",
+            run_dir / "checkpoints" / f"iter_{iteration:07d}",
+        )
+        for iteration in range(1, run.source.budget.training_updates + 1)
+    )
+    missing = [name for name, path in checkpoints if not path.is_dir()]
+    if missing:
+        raise ValueError(f"quality study checkpoints are missing: {missing}")
+    validation_dir = run_dir / "validation"
+    validation_dir.mkdir(parents=True, exist_ok=True)
+    request_path = validation_dir / "quality-study-request.json"
+    request_path.write_bytes(
+        canonical_json(
+            {
+                "operation": "quality_study",
+                "base_path": str(MODEL_PATH),
+                "dataset_sha256": quality_data_sha256,
+                "examples": [example.model_dump(mode="json") for example in examples],
+                "checkpoints": [{"name": name, "path": str(path)} for name, path in checkpoints],
+            }
+        )
+    )
+    stderr_path = validation_dir / "quality-study-worker.stderr"
+    lines: list[str] = []
+    with stderr_path.open("w") as stderr:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                str(REMOTE_REPO / "src/distill_lab/modal_validation_worker.py"),
+                str(request_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            text=True,
+        )
+        if process.stdout is None:
+            raise RuntimeError("quality worker has no stdout")
+        for line in process.stdout:
+            value = line.strip()
+            if value:
+                lines.append(value)
+                print(value, flush=True)
+        return_code = process.wait(timeout=7_000)
+    if return_code != 0 or not lines:
+        raise RuntimeError("quality study failed; inspect its private worker stderr")
+    evidence = QualityStudyEvidence.model_validate_json(lines[-1])
+    destination = validation_dir / "quality-study.json"
+    destination.write_bytes(canonical_json(evidence.model_dump(mode="json")))
+    result_volume.commit()
+    return evidence.model_dump(mode="json")
+
+
 def _compare_checkpoint_states(
     first_checkpoint: Path,
     second_checkpoint: Path,
@@ -765,6 +845,8 @@ def main(
     refresh_stale_tag: str | None = None,
     refresh_base_checkpoint_sha256: str | None = None,
     refresh_round_two_state_sha256: str | None = None,
+    quality_source_run: str | None = None,
+    quality_source_tag: str | None = None,
 ) -> None:
     if candidate_state_out is not None:
         state = prepare_candidate_state.remote(
@@ -786,6 +868,24 @@ def main(
     if run.source.budget.training_updates < 1:
         raise ValueError("Modal training requires at least one update")
     data = (LOCAL_REPO / training_data).read_text()
+    if quality_source_run is not None or quality_source_tag is not None:
+        if quality_source_run is None or quality_source_tag is None:
+            raise ValueError("quality validation requires source run and tag")
+        evaluation = run.source.evaluation
+        if evaluation.quality_dataset_path is None or evaluation.quality_dataset_sha256 is None:
+            raise ValueError("study has no quality evaluation dataset")
+        quality_data = (LOCAL_REPO / evaluation.quality_dataset_path).read_text()
+        if hashlib.sha256(quality_data.encode()).hexdigest() != evaluation.quality_dataset_sha256:
+            raise ValueError("quality evaluation dataset does not match the study")
+        result = validate_quality.remote(
+            run.model_dump_json(),
+            quality_source_run,
+            quality_source_tag,
+            quality_data,
+            evaluation.quality_dataset_sha256,
+        )
+        print(json.dumps(result, indent=2))
+        return
     refresh_values = (
         refresh_round_one_run,
         refresh_round_one_tag,
