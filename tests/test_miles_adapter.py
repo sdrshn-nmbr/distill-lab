@@ -194,7 +194,7 @@ def test_candidate_command_uses_resumable_global_dataset(tmp_path: Path) -> None
         save_path=Path("/root/checkpoints/run"),
     )
 
-    assert "--rollout-global-dataset" in command
+    assert "--disable-rollout-global-dataset" not in command
     assert "--ci-save-grad-norm" in command
 
 

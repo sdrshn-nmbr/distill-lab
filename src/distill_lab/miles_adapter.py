@@ -147,9 +147,7 @@ def build_miles_command(
         "--ci-test",
         "--ci-disable-logprobs-checker",
     )
-    if isinstance(method, CandidateTokenMethod):
-        arguments += ("--rollout-global-dataset",)
-    else:
+    if not isinstance(method, CandidateTokenMethod):
         arguments += ("--loss-mask-type", "distill_qwen")
     if isinstance(launch, ResumeTraining):
         if launch.completed_updates >= run.source.budget.training_updates:
