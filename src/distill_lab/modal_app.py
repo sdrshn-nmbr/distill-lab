@@ -19,6 +19,7 @@ from distill_lab.miles_adapter import (
 )
 from distill_lab.planning import load_study, require_clean_harness, resolve_study
 from distill_lab.receipts import AttemptRecorder, failure_code
+from distill_lab.security import reject_credentials
 
 REMOTE_REPO = Path("/workspace/distill-lab")
 REMOTE_MILES = Path("/workspace/miles")
@@ -169,7 +170,12 @@ def train(
             ray_started=ray_started,
             snapshot_path=run_dir / f"system-after-{recorder.attempt_id}.json",
         )
-        recorder.fail(failure_code=failure_code(error))
+        failure_path = run_dir / f"failure-{recorder.attempt_id}.json"
+        write_private_failure(failure_path, error)
+        recorder.fail(
+            failure_code=failure_code(error),
+            artifacts={"failure_evidence": _file_digest(failure_path)},
+        )
         result_volume.commit()
         raise RuntimeError("Modal training attempt failed; inspect its private artifacts") from None
     try:
@@ -188,7 +194,12 @@ def train(
         evidence_path = run_dir / f"evidence-{recorder.attempt_id}.json"
         evidence_path.write_bytes(canonical_json(evidence))
     except BaseException as error:
-        recorder.fail(failure_code=failure_code(error))
+        failure_path = run_dir / f"failure-{recorder.attempt_id}.json"
+        write_private_failure(failure_path, error)
+        recorder.fail(
+            failure_code=failure_code(error),
+            artifacts={"failure_evidence": _file_digest(failure_path)},
+        )
         result_volume.commit()
         raise RuntimeError("Modal evidence gate failed; inspect its private artifacts") from None
     terminal = recorder.complete(
@@ -411,3 +422,17 @@ def cleanup_runtime(
 
 def _file_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def write_private_failure(path: Path, error: BaseException) -> None:
+    evidence = canonical_json(
+        {
+            "error_type": type(error).__name__,
+            "message": str(error),
+        }
+    )
+    try:
+        reject_credentials(evidence.decode())
+    except ValueError:
+        evidence = canonical_json({"error_type": type(error).__name__, "message": "redacted"})
+    path.write_bytes(evidence)

@@ -23,6 +23,28 @@ def test_training_logs_are_attempt_scoped(tmp_path: Path) -> None:
     )
 
 
+def test_private_failure_records_diagnostic_without_credentials(tmp_path: Path) -> None:
+    destination = tmp_path / "failure.json"
+
+    modal_app.write_private_failure(destination, RuntimeError("dataset rejected"))
+
+    assert json.loads(destination.read_text()) == {
+        "error_type": "RuntimeError",
+        "message": "dataset rejected",
+    }
+
+
+def test_private_failure_redacts_credential_shaped_messages(tmp_path: Path) -> None:
+    destination = tmp_path / "failure.json"
+
+    modal_app.write_private_failure(destination, RuntimeError("tskey-auth-" + "A" * 40))
+
+    assert json.loads(destination.read_text()) == {
+        "error_type": "RuntimeError",
+        "message": "redacted",
+    }
+
+
 def test_system_snapshot_records_unavailable_commands(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:

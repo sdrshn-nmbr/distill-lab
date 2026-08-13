@@ -40,8 +40,8 @@ class AttemptRecorder:
     def complete(self, *, artifacts: dict[str, str]) -> AttemptReceipt:
         return self._finish(status="completed", failure_code=None, artifacts=artifacts)
 
-    def fail(self, *, failure_code: str) -> AttemptReceipt:
-        return self._finish(status="failed", failure_code=failure_code, artifacts={})
+    def fail(self, *, failure_code: str, artifacts: dict[str, str] | None = None) -> AttemptReceipt:
+        return self._finish(status="failed", failure_code=failure_code, artifacts=artifacts or {})
 
     def _finish(
         self,

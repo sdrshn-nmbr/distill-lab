@@ -26,7 +26,10 @@ def test_failed_attempt_contains_code_not_exception_text(tmp_path: Path) -> None
     run = resolve_study(load_study(Path("experiments/fixtures/minimal.json")))
     recorder = AttemptRecorder(run=run, operation="generate", root=tmp_path)
 
-    receipt = recorder.fail(failure_code="teacher_unavailable")
+    receipt = recorder.fail(
+        failure_code="teacher_unavailable", artifacts={"failure_evidence": "a" * 64}
+    )
 
     assert receipt.status == "failed"
     assert receipt.failure_code == "teacher_unavailable"
+    assert receipt.artifacts == {"failure_evidence": "a" * 64}
