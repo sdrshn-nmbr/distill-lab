@@ -136,7 +136,7 @@ def train(
     started = time.monotonic()
     ray_started = False
     try:
-        _write_system_snapshot(run_dir / f"system-before-{recorder.attempt_id}.json")
+        write_system_snapshot(run_dir / f"system-before-{recorder.attempt_id}.json")
         subprocess.run(
             ["ray", "start", "--head", "--num-gpus=1", "--disable-usage-stats"],
             check=True,
@@ -297,7 +297,7 @@ def _sample_gpu(path: Path, stop: threading.Event, interval: float) -> None:
         stop.wait(interval)
 
 
-def _write_system_snapshot(path: Path) -> None:
+def write_system_snapshot(path: Path) -> None:
     commands = {
         "processes": ["ps", "-eo", "pid,ppid,stat,etime,command"],
         "network": ["ss", "-lntp"],
@@ -305,8 +305,19 @@ def _write_system_snapshot(path: Path) -> None:
     }
     values: dict[str, Any] = {"timestamp": time.time()}
     for name, command in commands.items():
-        result = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
-        values[name] = {"return_code": result.returncode, "output": result.stdout}
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            values[name] = {"return_code": result.returncode, "output": result.stdout}
+        except FileNotFoundError:
+            values[name] = {"error": "command_unavailable"}
+        except subprocess.TimeoutExpired:
+            values[name] = {"error": "command_timed_out"}
     path.write_bytes(canonical_json(values))
 
 
@@ -343,7 +354,7 @@ def cleanup_runtime(
     actions = (
         ("telemetry_cleanup_failed", lambda: _stop_telemetry(telemetry, stop_telemetry)),
         ("ray_cleanup_failed", lambda: _stop_ray(ray_started)),
-        ("system_snapshot_failed", lambda: _write_system_snapshot(snapshot_path)),
+        ("system_snapshot_failed", lambda: write_system_snapshot(snapshot_path)),
     )
     for code, action in actions:
         try:

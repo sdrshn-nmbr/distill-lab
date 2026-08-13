@@ -1,3 +1,5 @@
+import json
+import subprocess
 from pathlib import Path
 
 from pytest import MonkeyPatch
@@ -13,6 +15,28 @@ def test_project_roots_use_packaged_paths_in_modal() -> None:
 
     assert repository == Path("/workspace/distill-lab")
     assert miles == Path("/workspace/miles")
+
+
+def test_system_snapshot_records_unavailable_commands(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    def run(
+        command: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        if command[0] == "ss":
+            raise FileNotFoundError("ss")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(modal_app.subprocess, "run", run)
+    destination = tmp_path / "system.json"
+
+    modal_app.write_system_snapshot(destination)
+
+    snapshot = json.loads(destination.read_text())
+    assert snapshot["processes"] == {"return_code": 0, "output": "ok"}
+    assert snapshot["network"] == {"error": "command_unavailable"}
+    assert snapshot["gpu"] == {"return_code": 0, "output": "ok"}
 
 
 def test_runtime_cleanup_attempts_every_action(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -31,7 +55,7 @@ def test_runtime_cleanup_attempts_every_action(monkeypatch: MonkeyPatch, tmp_pat
 
     monkeypatch.setattr(modal_app, "_stop_telemetry", fail_telemetry)
     monkeypatch.setattr(modal_app, "_stop_ray", fail_ray)
-    monkeypatch.setattr(modal_app, "_write_system_snapshot", snapshot)
+    monkeypatch.setattr(modal_app, "write_system_snapshot", snapshot)
 
     failures = modal_app.cleanup_runtime(
         telemetry=object(),
@@ -57,7 +81,7 @@ def test_runtime_cleanup_reports_snapshot_failure(monkeypatch: MonkeyPatch, tmp_
     def fail_snapshot(_path: Path) -> None:
         raise RuntimeError("snapshot failed")
 
-    monkeypatch.setattr(modal_app, "_write_system_snapshot", fail_snapshot)
+    monkeypatch.setattr(modal_app, "write_system_snapshot", fail_snapshot)
 
     failures = modal_app.cleanup_runtime(
         telemetry=object(),
