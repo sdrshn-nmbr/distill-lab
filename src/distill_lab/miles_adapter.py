@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -8,9 +9,17 @@ from pydantic import TypeAdapter
 
 from distill_lab.artifacts import LocalArtifactStore
 from distill_lab.canonical import canonical_json
-from distill_lab.contracts import ArtifactRef, CandidateTokenMethod, ResolvedRun
+from distill_lab.contracts import (
+    ArtifactRef,
+    CandidateTokenMethod,
+    FreshTraining,
+    ResolvedRun,
+    ResumeTraining,
+    TrainingLaunch,
+)
 
 _OBJECT = TypeAdapter(dict[str, Any])
+_SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
 
 def materialize_sft_training_data(
@@ -53,6 +62,7 @@ def materialize_candidate_training_data(
         request = raw["request"]
         selected = raw["teacher_output"]["selected_token_id"]
         token_ids = request["prompt_token_ids"] + request["student_token_ids"] + [selected]
+        response_length = len(request["student_token_ids"]) + 1
         rows.append(
             {
                 "text": request["prompt"],
@@ -61,7 +71,8 @@ def materialize_candidate_training_data(
                     "source_manifest": manifest.sha256,
                     "checkpoint_sha256": request["checkpoint_sha256"],
                     "token_ids": token_ids,
-                    "loss_mask": [0] * (len(token_ids) - 1) + [1],
+                    "response_length": response_length,
+                    "loss_mask": [0] * (response_length - 1) + [1],
                 },
             }
         )
@@ -75,9 +86,11 @@ def build_miles_command(
     model_path: Path,
     training_data: Path,
     save_path: Path,
+    launch: TrainingLaunch | None = None,
 ) -> tuple[str, ...]:
     training = run.source.training
     method = run.source.method
+    launch = launch or FreshTraining(kind="fresh")
     rollout_function = (
         "distill_lab.miles_rollout.generate_exact_token_rollout"
         if isinstance(method, CandidateTokenMethod)
@@ -125,7 +138,9 @@ def build_miles_command(
         "flash_attention_3",
         "--use-dynamic-batch-size",
         "--max-tokens-per-gpu",
-        str(training.max_response_tokens * training.micro_batch_size),
+        str(training.max_sequence_tokens * training.micro_batch_size),
+        "--ci-save-grad-norm",
+        str(save_path / "evidence" / "{role}-{rollout_id}-{step_id}.pt"),
     )
     if not isinstance(method, CandidateTokenMethod):
         arguments += (
@@ -133,6 +148,12 @@ def build_miles_command(
             "--apply-chat-template-kwargs",
             json.dumps({"enable_thinking": run.source.student.thinking_mode}),
         )
+    else:
+        arguments += ("--rollout-global-dataset",)
+    if isinstance(launch, ResumeTraining):
+        if launch.completed_updates >= run.source.budget.training_updates:
+            raise ValueError("resume checkpoint already reached the training update budget")
+        arguments += ("--load", launch.checkpoint_root)
     return (*run.components.miles_command, str(miles_checkout / "train_async.py"), *arguments)
 
 
@@ -163,10 +184,9 @@ def verify_miles_checkout(run: ResolvedRun, checkout: Path) -> None:
         raise ValueError("Miles checkout must be clean")
 
 
-def training_child_environment(source: dict[str, str]) -> dict[str, str]:
+def training_child_environment(source: dict[str, str], *, isolated_home: Path) -> dict[str, str]:
     allowed = {
         "CUDA_VISIBLE_DEVICES",
-        "HOME",
         "LANG",
         "LC_ALL",
         "MASTER_ADDR",
@@ -179,6 +199,13 @@ def training_child_environment(source: dict[str, str]) -> dict[str, str]:
         "USER",
     }
     environment = {name: source[name] for name in sorted(allowed & source.keys())}
+    python_paths = [str(_SOURCE_ROOT)]
+    if existing := environment.get("PYTHONPATH"):
+        python_paths.append(existing)
+    environment["PYTHONPATH"] = os.pathsep.join(python_paths)
+    isolated_home.mkdir(parents=True, exist_ok=True, mode=0o700)
+    isolated_home.chmod(0o700)
+    environment["HOME"] = str(isolated_home)
     environment["PYTHONUNBUFFERED"] = "1"
     return environment
 
@@ -192,13 +219,24 @@ def launch_miles_training(
     save_path: Path,
     log_path: Path,
     environment: dict[str, str] | None = None,
+    launch: TrainingLaunch | None = None,
 ) -> subprocess.CompletedProcess[str]:
     verify_miles_checkout(run, miles_checkout)
     if not training_data.is_file():
         raise ValueError(f"training data does not exist: {training_data}")
-    if save_path.exists() and any(save_path.iterdir()):
+    launch = launch or FreshTraining(kind="fresh")
+    if isinstance(launch, FreshTraining) and save_path.exists() and any(save_path.iterdir()):
         raise ValueError(f"training output directory is not empty: {save_path}")
+    if isinstance(launch, ResumeTraining):
+        if Path(launch.checkpoint_root).resolve() != save_path.resolve():
+            raise ValueError("resume checkpoint root must equal the training save path")
+        marker = save_path / "latest_checkpointed_iteration.txt"
+        if not marker.is_file():
+            raise ValueError("resume checkpoint is missing its latest-iteration marker")
+        if hashlib.sha256(marker.read_bytes()).hexdigest() != launch.latest_marker_sha256:
+            raise ValueError("resume checkpoint marker digest mismatch")
     save_path.mkdir(parents=True, exist_ok=True)
+    (save_path / "evidence").mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     command = build_miles_command(
         run=run,
@@ -206,6 +244,7 @@ def launch_miles_training(
         model_path=model_path,
         training_data=training_data,
         save_path=save_path,
+        launch=launch,
     )
     with log_path.open("x") as log:
         return subprocess.run(
@@ -215,8 +254,10 @@ def launch_miles_training(
             stdout=log,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=None,
-            env=training_child_environment(environment or dict(os.environ)),
+            timeout=run.source.training.timeout_seconds,
+            env=training_child_environment(
+                environment or dict(os.environ), isolated_home=save_path / ".home"
+            ),
         )
 
 

@@ -9,6 +9,7 @@ from distill_lab.gateway import GatewayService, create_app
 from distill_lab.planning import load_study, resolve_study
 from distill_lab.teacher import (
     GenerationRequest,
+    RetryableTeacherTransportError,
     TeacherGeneration,
     TeacherSelection,
     TeacherTransportError,
@@ -34,6 +35,9 @@ class FakeBackend:
         self.release = asyncio.Event()
         self.block = False
         self.closed = False
+
+    async def probe(self) -> None:
+        return None
 
     async def generate(
         self,
@@ -117,7 +121,7 @@ async def test_transport_failure_retries_once_with_a_fresh_budgeted_turn(
     tmp_path: Path, backend: FakeBackend
 ) -> None:
     backend.results = [
-        TeacherTransportError("dead process"),
+        RetryableTeacherTransportError("dead process"),
         [TeacherGeneration(text="Recovered.", output_tokens=2)],
     ]
     service = _service(tmp_path, backend)
@@ -137,6 +141,66 @@ async def test_semantic_failure_does_not_retry(tmp_path: Path, backend: FakeBack
         await service.generate_batch([_request("trace")])
 
     assert len(backend.calls) == 1
+
+
+async def test_terminal_transport_failure_does_not_retry(
+    tmp_path: Path, backend: FakeBackend
+) -> None:
+    backend.results = [TeacherTransportError("terminal")]
+    service = _service(tmp_path, backend)
+
+    with pytest.raises(TeacherTransportError, match="terminal"):
+        await service.generate_batch([_request("trace")])
+
+    assert len(backend.calls) == 1
+    assert service.metrics.transport_retries == 0
+
+
+async def test_zero_output_allowance_starts_no_teacher_turn(
+    tmp_path: Path, backend: FakeBackend
+) -> None:
+    run = resolve_study(load_study(Path("experiments/fixtures/minimal.json")))
+    run = run.model_copy(
+        update={
+            "source": run.source.model_copy(
+                update={
+                    "budget": run.source.budget.model_copy(
+                        update={"observed_output_token_limit": 0}
+                    )
+                }
+            )
+        }
+    )
+    service = GatewayService(run=run, backend=backend, cache_path=tmp_path / "cache.sqlite3")
+
+    with pytest.raises(RuntimeError, match="output token limit exhausted"):
+        await service.generate_batch([_request("trace")])
+
+    assert backend.calls == []
+    assert service.metrics.teacher_turns == 0
+
+
+async def test_over_limit_usage_is_counted_before_rejection(
+    tmp_path: Path, backend: FakeBackend
+) -> None:
+    run = resolve_study(load_study(Path("experiments/fixtures/minimal.json")))
+    run = run.model_copy(
+        update={
+            "source": run.source.model_copy(
+                update={
+                    "budget": run.source.budget.model_copy(
+                        update={"observed_output_token_limit": 2}
+                    )
+                }
+            )
+        }
+    )
+    service = GatewayService(run=run, backend=backend, cache_path=tmp_path / "cache.sqlite3")
+
+    with pytest.raises(RuntimeError, match="output token limit exceeded"):
+        await service.generate_batch([_request("trace")])
+
+    assert service.metrics.output_tokens == 3
 
 
 async def test_last_waiter_cancellation_cleans_the_backend_operation(
@@ -163,8 +227,9 @@ async def test_http_surface_auth_health_readiness_and_metrics(
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         missing = await client.post("/v1/generate", json={"requests": [_request("trace")]})
         health = await client.get("/healthz")
-        ready = await client.get("/readyz")
-        metrics = await client.get("/metrics")
+        headers = {"Authorization": "Bearer test-secret"}
+        ready = await client.get("/readyz", headers=headers)
+        metrics = await client.get("/metrics", headers=headers)
 
     assert missing.status_code == 401
     assert health.status_code == ready.status_code == metrics.status_code == 200

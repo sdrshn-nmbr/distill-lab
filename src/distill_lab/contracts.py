@@ -45,12 +45,27 @@ class PromptSpec(StrictModel):
     privileged_version: str | None
 
 
-class DatasetSpec(StrictModel):
+class LocalDatasetSpec(StrictModel):
+    kind: Literal["local"]
+    path: str = Field(pattern=r"^[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)*$")
+    configuration: str = Field(min_length=1)
+    split: str = Field(min_length=1)
+    content_sha256: Digest
+
+
+class HuggingFaceDatasetSpec(StrictModel):
+    kind: Literal["hugging_face"]
     repository: str = Field(min_length=1)
     revision: Commit
     configuration: str = Field(min_length=1)
     split: str = Field(min_length=1)
     content_sha256: Digest
+
+
+DatasetSpec = Annotated[
+    LocalDatasetSpec | HuggingFaceDatasetSpec,
+    Field(discriminator="kind"),
+]
 
 
 class CodexTeacher(StrictModel):
@@ -76,8 +91,26 @@ class TrainingSpec(StrictModel):
     global_batch_size: int = Field(ge=1)
     micro_batch_size: int = Field(ge=1)
     max_response_tokens: int = Field(ge=1)
-    target_token_budget: int = Field(ge=1)
+    max_sequence_tokens: int = Field(ge=1)
     checkpoint_interval: int = Field(ge=1)
+    timeout_seconds: int = Field(ge=1, le=14_400)
+
+
+class FreshTraining(StrictModel):
+    kind: Literal["fresh"]
+
+
+class ResumeTraining(StrictModel):
+    kind: Literal["resume"]
+    checkpoint_root: str = Field(min_length=1)
+    latest_marker_sha256: Digest
+    completed_updates: int = Field(ge=1)
+
+
+TrainingLaunch = Annotated[
+    FreshTraining | ResumeTraining,
+    Field(discriminator="kind"),
+]
 
 
 class MilesSpec(StrictModel):
@@ -104,9 +137,8 @@ class MilesSpec(StrictModel):
 
 
 class EvaluationSpec(StrictModel):
-    kind: Literal["exact_match", "deep_swe"]
+    kind: Literal["contains", "deep_swe"]
     definition_version: str = Field(min_length=1)
-    dataset_revision: Commit
     evaluator_sha256: Digest
 
 
@@ -160,7 +192,7 @@ ExecutionSpec = Annotated[
 class RunBudget(StrictModel):
     teacher_turns: int = Field(ge=0)
     teacher_items: int = Field(ge=0)
-    output_tokens: int = Field(ge=0)
+    observed_output_token_limit: int = Field(ge=0)
     retries: int = Field(ge=0, le=1)
     concurrency: int = Field(ge=1, le=32)
     training_updates: int = Field(ge=0)
@@ -212,10 +244,20 @@ class ResolvedComponents(StrictModel):
     artifact_namespace: str = Field(pattern=r"^run_[0-9a-f]{16}$")
 
 
+class HarnessIdentity(StrictModel):
+    revision: Commit
+    dirty: bool
+    source_sha256: Digest
+    lock_sha256: Digest
+    study_schema_sha256: Digest
+    prompt_implementation_sha256: Digest
+
+
 class ResolvedRun(StrictModel):
     schema_version: Literal[1] = 1
     run_id: str = Field(pattern=r"^run_[0-9a-f]{16}$")
     source: StudySpec
+    harness: HarnessIdentity
     components: ResolvedComponents
 
 

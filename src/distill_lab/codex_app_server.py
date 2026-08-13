@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
-from collections import deque
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, cast
 
@@ -11,6 +10,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from distill_lab.teacher import (
     GenerationRequest,
+    RetryableTeacherTransportError,
     TeacherGeneration,
     TeacherSelection,
     TeacherTransportError,
@@ -19,6 +19,27 @@ from distill_lab.teacher import (
 
 _JSON_OBJECT = TypeAdapter(dict[str, Any])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, Any]])
+_TOOL_FREE_CONFIG = {
+    "features": {
+        "apps": False,
+        "browser_use": False,
+        "collab": False,
+        "computer_use": False,
+        "image_generation": False,
+        "multi_agent": False,
+        "plugins": False,
+        "shell_tool": False,
+        "standalone_web_search": False,
+        "tool_search": False,
+        "unified_exec": False,
+        "web_search": False,
+        "web_search_request": False,
+    },
+    "include_apps_instructions": False,
+    "include_collaboration_mode_instructions": False,
+    "include_environment_context": False,
+    "include_permissions_instructions": False,
+}
 
 
 class CodexAppServerBackend:
@@ -44,7 +65,6 @@ class CodexAppServerBackend:
         self._environment = dict(environment)
         self._process: asyncio.subprocess.Process | None = None
         self._stderr_task: asyncio.Task[None] | None = None
-        self._stderr_lines: deque[str] = deque(maxlen=100)
         self._request_id = 0
         self._lock = asyncio.Lock()
         self._temporary_directory = tempfile.TemporaryDirectory(prefix="distill-lab-codex-")
@@ -156,6 +176,7 @@ class CodexAppServerBackend:
                     "Return only the requested structured data. Never call tools. "
                     "Do not mention the hidden context."
                 ),
+                "config": _TOOL_FREE_CONFIG,
             },
         )
         thread_id = _required_string(thread, "thread", "id")
@@ -184,8 +205,11 @@ class CodexAppServerBackend:
             method = message.get("method")
             if method == "item/completed" and params.get("turnId") == turn_id:
                 item = _object(params.get("item"), "completed item")
-                if item.get("type") == "agentMessage" and isinstance(item.get("text"), str):
+                item_type = item.get("type")
+                if item_type == "agentMessage" and isinstance(item.get("text"), str):
                     final_text = item["text"]
+                elif item_type not in {"reasoning"}:
+                    raise TeacherTransportError("Codex app-server emitted a forbidden item")
             elif method == "thread/tokenUsage/updated" and params.get("turnId") == turn_id:
                 usage = _object(params.get("tokenUsage"), "token usage")
                 last = _object(usage.get("last"), "last token usage")
@@ -262,11 +286,9 @@ class CodexAppServerBackend:
                 if "error" in message:
                     error = _object(message["error"], "JSON-RPC error")
                     code = error.get("code")
-                    retryable = code == -32001
-                    suffix = " (retryable)" if retryable else ""
-                    raise TeacherTransportError(
-                        f"Codex app-server {method} failed{suffix}: {error.get('message')}"
-                    )
+                    if code == -32001:
+                        raise RetryableTeacherTransportError("Codex app-server is overloaded")
+                    raise TeacherTransportError("Codex app-server request failed")
                 return _object(message.get("result"), f"{method} result")
             if "id" in message and "method" in message:
                 await self._write(
@@ -285,25 +307,23 @@ class CodexAppServerBackend:
     async def _write(self, message: dict[str, Any]) -> None:
         process = self._process
         if process is None or process.stdin is None or process.returncode is not None:
-            raise TeacherTransportError("Codex app-server is not running")
+            raise RetryableTeacherTransportError("Codex app-server is not running")
         process.stdin.write(json.dumps(message, separators=(",", ":")).encode() + b"\n")
         try:
             await process.stdin.drain()
         except (BrokenPipeError, ConnectionResetError) as error:
-            raise TeacherTransportError("Codex app-server pipe closed") from error
+            raise RetryableTeacherTransportError("Codex app-server pipe closed") from error
 
     async def _read(self) -> dict[str, Any]:
         process = self._process
         if process is None or process.stdout is None:
-            raise TeacherTransportError("Codex app-server is not running")
+            raise RetryableTeacherTransportError("Codex app-server is not running")
         try:
             line = await asyncio.wait_for(process.stdout.readline(), timeout=self._timeout_seconds)
         except TimeoutError as error:
-            raise TeacherTransportError("Codex app-server response timed out") from error
+            raise RetryableTeacherTransportError("Codex app-server response timed out") from error
         if not line:
-            detail = "\n".join(self._stderr_lines)
-            suffix = f": {detail}" if detail else ""
-            raise TeacherTransportError(f"Codex app-server exited unexpectedly{suffix}")
+            raise RetryableTeacherTransportError("Codex app-server exited unexpectedly")
         try:
             return _JSON_OBJECT.validate_python(json.loads(line))
         except (json.JSONDecodeError, ValidationError) as error:
@@ -313,8 +333,8 @@ class CodexAppServerBackend:
         process = self._process
         if process is None or process.stderr is None:
             return
-        while line := await process.stderr.readline():
-            self._stderr_lines.append(line.decode(errors="replace").rstrip())
+        while await process.stderr.readline():
+            pass
 
     async def _stop_process(self) -> None:
         process = self._process

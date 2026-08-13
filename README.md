@@ -23,7 +23,7 @@ The project stores every input and result with a stable hash. It calls Miles as 
 - Added CI for the lock file, tests, strict types, formatting, schema drift, compilation, and Git history secret scanning.
 - Added the real async single-flight seam. Two equal requests share one operation. One cancelled caller cannot stop another. The last cancelled caller stops and cleans up the operation.
 - The first CI run found one false positive: a tokenizer commit was mistaken for an API key. The exception names only that exact Git finding. CI now scans all history with a pinned scanner image.
-- Added the complete-response gateway and a real Codex app-server adapter. The adapter checks the exact binary hash and version, uses an empty temporary workspace, disables tools, records exact output-token usage, and kills failed or cancelled processes.
+- Added the complete-response gateway and a real Codex app-server adapter. The adapter checks the exact binary hash and version, uses an empty temporary workspace, turns off every supported tool surface, fails if a tool item still appears, records observed output-token use, and kills failed or cancelled processes.
 - A live no-turn probe found `gpt-5.6-terra` and closed cleanly.
 - One live Pinapple teacher turn completed with zero retries in 5.51 seconds. The answer passed verification. The public manifest did not contain the hidden context. The private record did.
 - The live run found one reproducibility bug: cache timing changed the dataset hash. Semantic data and execution receipts are now separate. Two cached reruns produced the same manifest hash.
@@ -31,6 +31,11 @@ The project stores every input and result with a stable hash. It calls Miles as 
 - Added the Miles boundary. Full answers become standard `messages` data for Miles SFT. Token choices keep the full Qwen prefix and a loss mask with one target position. The target is never converted to text and retokenized.
 - The Miles launcher refuses a dirty checkout or the wrong commit. Teacher, Tailnet, and gateway credentials are removed from the training process environment.
 - Fixed the candidate-state position contract before GPU work. The next-token position must equal the number of student response tokens already in the prefix.
+- A meta review found that the first exact-token adapter used the full sequence as the response. Pinned Miles would have produced an empty response-logit slice. The adapter now uses the student suffix plus the selected token. Its loss mask has one selected-token target.
+- Ran that boundary against the exact pinned Miles checkout. The correct form produced two response logits. The old full-length form produced none, so the test can tell the fixed code from the broken code.
+- Added a tokenizer preflight. It checks the exact Qwen chat template, rendered prompt IDs, prefix text, vocabulary bounds, candidate IDs, candidate text, and checkpoint hash before Codex or Miles can use a candidate state.
+- The Miles child now imports the small external rollout through an explicit source path and uses an isolated home directory with no Codex credentials.
+- Added terminal attempt receipts. Each external attempt ends once as completed or failed. Public failures contain a stable code, not raw prompts, stderr, or credentials.
 
 ## Current proof
 

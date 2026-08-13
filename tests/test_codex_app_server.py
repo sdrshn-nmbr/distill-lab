@@ -29,11 +29,18 @@ for line in sys.stdin:
         response = {"id": request_id, "result": {"data": [{"model": "gpt-5.6-terra"}]}}
         print(json.dumps(response), flush=True)
     elif method == "thread/start":
+        if mode == "require_tool_free":
+            features = message["params"]["config"]["features"]
+            assert features and all(value is False for value in features.values())
         response = {"id": request_id, "result": {"thread": {"id": "thread-1"}}}
         print(json.dumps(response), flush=True)
     elif method == "turn/start":
         if mode == "die":
             sys.exit(7)
+        if mode == "terminal_rpc_error":
+            error = {"id": request_id, "error": {"code": -32602, "message": "sensitive"}}
+            print(json.dumps(error), flush=True)
+            continue
         print(json.dumps({"id": request_id, "result": {"turn": {"id": "turn-1"}}}), flush=True)
         if mode == "hang":
             continue
@@ -63,6 +70,15 @@ for line in sys.stdin:
             "params": {"turn": {"id": "turn-1", "status": "completed"}},
         }
         print(json.dumps(usage), flush=True)
+        if mode == "tool_item":
+            tool = {
+                "method": "item/completed",
+                "params": {
+                    "turnId": "turn-1",
+                    "item": {"type": "commandExecution", "command": "sensitive"},
+                },
+            }
+            print(json.dumps(tool), flush=True)
         print(json.dumps(item), flush=True)
         print(json.dumps(completed), flush=True)
 """
@@ -130,6 +146,34 @@ async def test_malformed_semantic_output_fails_without_a_live_process(tmp_path: 
         await backend.generate([_request()], output_token_limit=32)
 
     assert not backend.running
+    await backend.close()
+
+
+async def test_terminal_json_rpc_error_is_redacted_and_not_retryable(tmp_path: Path) -> None:
+    backend = _backend(tmp_path, "terminal_rpc_error")
+
+    with pytest.raises(TeacherTransportError, match="request failed") as captured:
+        await backend.generate([_request()], output_token_limit=32)
+
+    assert "sensitive" not in str(captured.value)
+    assert not backend.running
+
+
+async def test_any_tool_item_fails_the_turn_closed(tmp_path: Path) -> None:
+    backend = _backend(tmp_path, "tool_item")
+
+    with pytest.raises(TeacherTransportError, match="forbidden item"):
+        await backend.generate([_request()], output_token_limit=32)
+
+    assert not backend.running
+
+
+async def test_thread_explicitly_disables_every_supported_tool_surface(tmp_path: Path) -> None:
+    backend = _backend(tmp_path, "require_tool_free")
+
+    result = await backend.generate([_request()], output_token_limit=32)
+
+    assert result[0].text == "Add pinapple."
     await backend.close()
 
 

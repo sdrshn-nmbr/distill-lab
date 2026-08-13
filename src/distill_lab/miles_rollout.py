@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
-
-from pydantic import TypeAdapter, ValidationError
-
-_INT_LIST = TypeAdapter(list[int])
+from typing import Protocol, TypeGuard, cast
 
 
 class RolloutArgs(Protocol):
@@ -43,17 +39,31 @@ def generate_exact_token_rollout(
             raise ValueError("exact-token training requires one sample per prompt")
         sample = group[0]
         raw_token_ids = sample.metadata.get("token_ids")
+        raw_response_length = sample.metadata.get("response_length")
         raw_loss_mask = sample.metadata.get("loss_mask")
-        try:
-            token_ids = _INT_LIST.validate_python(raw_token_ids)
-            loss_mask = _INT_LIST.validate_python(raw_loss_mask)
-        except ValidationError as error:
-            raise ValueError("invalid exact-token metadata") from error
-        if len(token_ids) != len(loss_mask) or not token_ids or sum(loss_mask) != 1:
+        if not _is_int_list(raw_token_ids) or not _is_int_list(raw_loss_mask):
+            raise ValueError("invalid exact-token metadata")
+        if not isinstance(raw_response_length, int) or isinstance(raw_response_length, bool):
+            raise ValueError("invalid exact-token metadata")
+        token_ids = raw_token_ids
+        response_length = raw_response_length
+        loss_mask = raw_loss_mask
+        if (
+            response_length <= 0
+            or response_length > len(token_ids)
+            or len(loss_mask) != response_length
+            or sum(loss_mask) != 1
+        ):
             raise ValueError("invalid exact-token metadata")
         sample.tokens = token_ids
         sample.loss_mask = loss_mask
-        sample.response_length = len(token_ids)
+        sample.response_length = response_length
         sample.reward = 0
         result.append(sample)
     return result
+
+
+def _is_int_list(value: object) -> TypeGuard[list[int]]:
+    if not isinstance(value, list):
+        return False
+    return all(type(item) is int for item in cast(list[object], value))

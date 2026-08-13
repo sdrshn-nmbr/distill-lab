@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from distill_lab.planning import load_study
+from distill_lab.planning import load_study, require_clean_harness, resolve_study
 
 
 def _minimal() -> dict[str, object]:
@@ -62,11 +62,27 @@ def test_miles_repository_rejects_credential_surfaces(tmp_path: Path, repository
 
 
 def test_trace_only_fields_do_not_change_teacher_cache_namespace(tmp_path: Path) -> None:
-    from distill_lab.planning import resolve_study
-
     source = load_study(Path("experiments/fixtures/minimal.json"))
     first = resolve_study(source)
     second = resolve_study(source.model_copy(update={"name": "another-trace-name", "seed": 73}))
 
     assert first.run_id != second.run_id
     assert first.components.teacher_cache_namespace == second.components.teacher_cache_namespace
+
+
+def test_harness_implementation_changes_run_and_cache_identity() -> None:
+    source = load_study(Path("experiments/fixtures/minimal.json"))
+    first = resolve_study(source)
+    changed = first.harness.model_copy(update={"prompt_implementation_sha256": "f" * 64})
+    second = resolve_study(source, harness=changed)
+
+    assert first.run_id != second.run_id
+    assert first.components.teacher_cache_namespace != second.components.teacher_cache_namespace
+
+
+def test_dirty_harness_cannot_execute_externally() -> None:
+    run = resolve_study(load_study(Path("experiments/fixtures/minimal.json")))
+    dirty = run.model_copy(update={"harness": run.harness.model_copy(update={"dirty": True})})
+
+    with pytest.raises(ValueError, match="must be clean"):
+        require_clean_harness(dirty)

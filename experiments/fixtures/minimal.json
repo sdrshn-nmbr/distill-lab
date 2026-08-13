@@ -14,8 +14,8 @@
     "privileged_version": "v1"
   },
   "dataset": {
-    "repository": "distill-lab/fixtures",
-    "revision": "1111111111111111111111111111111111111111",
+    "kind": "local",
+    "path": "datasets/fixtures/pinapple.jsonl",
     "configuration": "pinapple",
     "split": "train",
     "content_sha256": "524513d5ea9ffbd438ca1b357aa0b3c465c68dd2a0f0460b2f187e5e89e86af1"
@@ -32,7 +32,7 @@
     "model": "Qwen/Qwen3.5-4B",
     "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
     "tokenizer_revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
-    "chat_template_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "chat_template_sha256": "a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715",
     "thinking_mode": false
   },
   "training": {
@@ -41,19 +41,19 @@
     "global_batch_size": 1,
     "micro_batch_size": 1,
     "max_response_tokens": 128,
-    "target_token_budget": 128,
-    "checkpoint_interval": 1
+    "max_sequence_tokens": 4096,
+    "checkpoint_interval": 1,
+    "timeout_seconds": 7200
   },
   "miles": {
     "repository": "https://github.com/sdrshn-nmbr/miles.git",
     "revision": "4b1974cfd656a484d457c7abf3d25bc8380cab5a",
-    "image": "example.invalid/distill-lab/miles@sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    "image": "radixark/miles@sha256:1594af286e00a2a937c1ccf446b840af59cc59937d487b79ec2de2d778eae6f1"
   },
   "evaluation": {
-    "kind": "exact_match",
+    "kind": "contains",
     "definition_version": "pinapple-v1",
-    "dataset_revision": "4444444444444444444444444444444444444444",
-    "evaluator_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    "evaluator_sha256": "6d90316fe64c648c7ab31f72b15cd4acddbd1170acf9d40cf6a4c830e116e027"
   },
   "artifacts": {
     "kind": "local",
@@ -75,7 +75,7 @@
   "budget": {
     "teacher_turns": 4,
     "teacher_items": 8,
-    "output_tokens": 512,
+    "observed_output_token_limit": 512,
     "retries": 1,
     "concurrency": 1,
     "training_updates": 1

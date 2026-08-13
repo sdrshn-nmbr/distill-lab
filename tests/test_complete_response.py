@@ -23,6 +23,9 @@ class FakeBackend:
     def __init__(self) -> None:
         self.results: list[list[TeacherGeneration]] = []
 
+    async def probe(self) -> None:
+        return None
+
     async def generate(
         self,
         requests: Sequence[GenerationRequest],
@@ -78,6 +81,7 @@ async def test_complete_response_writes_private_raw_data_and_public_manifest(
         examples=examples,
         gateway=gateway,
         artifacts=store,
+        attempt_id="attempt-one",
     )
 
     manifest = store.read_bytes(generated.manifest).decode()
@@ -107,6 +111,7 @@ async def test_failed_verification_is_recorded_not_silently_trained(tmp_path: Pa
         examples=examples,
         gateway=gateway,
         artifacts=store,
+        attempt_id="attempt-one",
     )
 
     manifest = store.read_bytes(generated.manifest).decode()
@@ -123,10 +128,18 @@ async def test_cached_rerun_keeps_the_semantic_manifest_identical(tmp_path: Path
     store = LocalArtifactStore(tmp_path / "objects")
 
     first = await run_complete_response(
-        run=run, examples=examples, gateway=gateway, artifacts=store
+        run=run,
+        examples=examples,
+        gateway=gateway,
+        artifacts=store,
+        attempt_id="attempt-one",
     )
     second = await run_complete_response(
-        run=run, examples=examples, gateway=gateway, artifacts=store
+        run=run,
+        examples=examples,
+        gateway=gateway,
+        artifacts=store,
+        attempt_id="attempt-two",
     )
 
     assert first.manifest == second.manifest

@@ -1,9 +1,13 @@
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from distill_lab.artifacts import LocalArtifactStore
+from distill_lab.contracts import ResumeTraining
 from distill_lab.miles_adapter import (
     build_miles_command,
     materialize_candidate_training_data,
@@ -90,7 +94,8 @@ def test_candidate_manifest_materializes_exact_tokens_and_one_target(tmp_path: P
 
     row = json.loads(output.read_text())
     assert row["metadata"]["token_ids"] == [100, 101, 200, 201, 10]
-    assert row["metadata"]["loss_mask"] == [0, 0, 0, 0, 1]
+    assert row["metadata"]["response_length"] == 3
+    assert row["metadata"]["loss_mask"] == [0, 0, 1]
 
 
 def test_exact_token_rollout_copies_metadata_without_retokenizing() -> None:
@@ -102,7 +107,13 @@ def test_exact_token_rollout_copies_metadata_without_retokenizing() -> None:
         reward: int | None = None
         loss_mask: list[int] | None = None
 
-    sample = Sample(metadata={"token_ids": [100, 101, 200, 10], "loss_mask": [0, 0, 0, 1]})
+    sample = Sample(
+        metadata={
+            "token_ids": [100, 101, 200, 10],
+            "response_length": 2,
+            "loss_mask": [0, 1],
+        }
+    )
 
     class Buffer:
         def get_samples(self, count: int):
@@ -121,8 +132,8 @@ def test_exact_token_rollout_copies_metadata_without_retokenizing() -> None:
     )
 
     assert result[0].tokens == [100, 101, 200, 10]
-    assert result[0].loss_mask == [0, 0, 0, 1]
-    assert result[0].response_length == 4
+    assert result[0].loss_mask == [0, 1]
+    assert result[0].response_length == 2
 
 
 def test_miles_command_uses_stock_sft_boundary_and_exact_run_settings(tmp_path: Path) -> None:
@@ -147,6 +158,74 @@ def test_miles_command_uses_stock_sft_boundary_and_exact_run_settings(tmp_path: 
     assert "--debug-train-only" in command
     assert command[command.index("--lr") + 1] == "1e-06"
     assert command[command.index("--num-rollout") + 1] == "1"
+    assert command[command.index("--max-tokens-per-gpu") + 1] == "4096"
+
+
+def test_candidate_command_uses_resumable_global_dataset(tmp_path: Path) -> None:
+    run = resolve_study(load_study(Path("experiments/fixtures/candidate.json")))
+
+    command = build_miles_command(
+        run=run,
+        miles_checkout=tmp_path / "miles",
+        model_path=Path("/root/models/Qwen3.5-4B"),
+        training_data=Path("/root/data/train.jsonl"),
+        save_path=Path("/root/checkpoints/run"),
+    )
+
+    assert "--rollout-global-dataset" in command
+    assert "--ci-save-grad-norm" in command
+
+
+def test_resume_command_loads_exact_checkpoint_and_only_remaining_updates(
+    tmp_path: Path,
+) -> None:
+    run = resolve_study(load_study(Path("experiments/fixtures/candidate.json")))
+    run = run.model_copy(
+        update={
+            "source": run.source.model_copy(
+                update={"budget": run.source.budget.model_copy(update={"training_updates": 2})}
+            )
+        }
+    )
+    checkpoint = tmp_path / "checkpoints"
+    launch = ResumeTraining(
+        kind="resume",
+        checkpoint_root=str(checkpoint),
+        latest_marker_sha256="a" * 64,
+        completed_updates=1,
+    )
+
+    command = build_miles_command(
+        run=run,
+        miles_checkout=tmp_path / "miles",
+        model_path=Path("/root/models/Qwen3.5-4B"),
+        training_data=Path("/root/data/train.jsonl"),
+        save_path=checkpoint,
+        launch=launch,
+    )
+
+    assert command[command.index("--load") + 1] == str(checkpoint)
+    assert command[command.index("--num-rollout") + 1] == "2"
+
+
+def test_resume_rejects_an_already_complete_budget(tmp_path: Path) -> None:
+    run = resolve_study(load_study(Path("experiments/fixtures/candidate.json")))
+    launch = ResumeTraining(
+        kind="resume",
+        checkpoint_root=str(tmp_path / "checkpoints"),
+        latest_marker_sha256="a" * 64,
+        completed_updates=1,
+    )
+
+    with pytest.raises(ValueError, match="already reached"):
+        build_miles_command(
+            run=run,
+            miles_checkout=tmp_path / "miles",
+            model_path=Path("/root/models/Qwen3.5-4B"),
+            training_data=Path("/root/data/train.jsonl"),
+            save_path=tmp_path / "checkpoints",
+            launch=launch,
+        )
 
 
 def test_miles_checkout_must_match_exact_clean_revision(tmp_path: Path) -> None:
@@ -183,7 +262,7 @@ def test_miles_checkout_must_match_exact_clean_revision(tmp_path: Path) -> None:
         raise AssertionError("dirty Miles checkout was accepted")
 
 
-def test_training_environment_drops_teacher_and_network_credentials() -> None:
+def test_training_environment_drops_teacher_and_network_credentials(tmp_path: Path) -> None:
     child = training_child_environment(
         {
             "HOME": "/tmp/home",
@@ -191,9 +270,30 @@ def test_training_environment_drops_teacher_and_network_credentials() -> None:
             "DISTILL_LAB_GATEWAY_TOKEN": "gateway-secret",
             "TS_AUTHKEY": "tailnet-secret",
             "OPENAI_API_KEY": "teacher-secret",
-        }
+        },
+        isolated_home=tmp_path / "isolated-home",
     )
 
-    assert child["HOME"] == "/tmp/home"
+    assert child["HOME"] == str(tmp_path / "isolated-home")
     assert child["PYTHONUNBUFFERED"] == "1"
     assert not any("secret" in value for value in child.values())
+
+
+def test_training_environment_makes_external_rollout_importable(tmp_path: Path) -> None:
+    child = training_child_environment(dict(os.environ), isolated_home=tmp_path / "isolated-home")
+
+    subprocess.run(
+        [
+            "uv",
+            "run",
+            "--no-project",
+            "python",
+            "-c",
+            "from distill_lab.miles_rollout import generate_exact_token_rollout",
+        ],
+        check=True,
+        cwd=tmp_path,
+        env=child,
+        capture_output=True,
+        text=True,
+    )

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Annotated, Protocol
 
 from pydantic import Field, model_validator
 
@@ -9,10 +9,10 @@ from distill_lab.contracts import Digest, StrictModel
 
 
 class GenerationRequest(StrictModel):
-    request_id: str = Field(min_length=1)
-    prompt: str = Field(min_length=1)
-    privileged_context: str | None
-    instructions: str = Field(min_length=1)
+    request_id: str = Field(min_length=1, max_length=128)
+    prompt: str = Field(min_length=1, max_length=131_072)
+    privileged_context: str | None = Field(max_length=131_072)
+    instructions: str = Field(min_length=1, max_length=32_768)
 
 
 class TeacherGeneration(StrictModel):
@@ -36,12 +36,13 @@ class CandidateToken(StrictModel):
 
 
 class TokenSelectionRequest(StrictModel):
-    request_id: str = Field(min_length=1)
+    request_id: str = Field(min_length=1, max_length=128)
     checkpoint_sha256: Digest
-    prompt: str = Field(min_length=1)
-    student_prefix: str
-    prompt_token_ids: list[int] = Field(min_length=1)
-    student_token_ids: list[int] = Field(min_length=1)
+    prompt: str = Field(min_length=1, max_length=131_072)
+    privileged_context: str | None = Field(default=None, max_length=131_072)
+    student_prefix: str = Field(max_length=131_072)
+    prompt_token_ids: list[Annotated[int, Field(ge=0)]] = Field(min_length=1)
+    student_token_ids: list[Annotated[int, Field(ge=0)]]
     position: int = Field(ge=0)
     candidates: list[CandidateToken] = Field(min_length=2, max_length=256)
 
@@ -73,6 +74,8 @@ class TokenSelectionResult(StrictModel):
 
 
 class TeacherBackend(Protocol):
+    async def probe(self) -> None: ...
+
     async def generate(
         self,
         requests: Sequence[GenerationRequest],
@@ -91,4 +94,8 @@ class TeacherBackend(Protocol):
 
 
 class TeacherTransportError(RuntimeError):
+    pass
+
+
+class RetryableTeacherTransportError(TeacherTransportError):
     pass

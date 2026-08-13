@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Pinned public Qwen tokenizer revision"
+paths = ['''experiments/fixtures/(minimal|candidate)\.json''']
+regexes = ['''851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a''']

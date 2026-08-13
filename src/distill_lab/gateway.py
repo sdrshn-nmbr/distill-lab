@@ -19,6 +19,7 @@ from distill_lab.singleflight import SingleFlightGroup
 from distill_lab.teacher import (
     GenerationRequest,
     GenerationResult,
+    RetryableTeacherTransportError,
     TeacherBackend,
     TeacherGeneration,
     TeacherSelection,
@@ -51,6 +52,13 @@ class GatewayMetrics:
     output_tokens: int
     transport_retries: int
     failures: int
+    cache_hits: int
+    teacher_results: int
+    teacher_latency_seconds: float
+    active_batches: int
+    remaining_teacher_turns: int
+    remaining_teacher_items: int
+    remaining_observed_output_tokens: int
 
 
 @dataclass(frozen=True)
@@ -92,6 +100,9 @@ class GatewayService:
         self._output_tokens = 0
         self._transport_retries = 0
         self._failures = 0
+        self._cache_hits = 0
+        self._teacher_results = 0
+        self._teacher_latency_seconds = 0.0
         self._closed = False
 
     @property
@@ -106,7 +117,17 @@ class GatewayService:
             output_tokens=self._output_tokens,
             transport_retries=self._transport_retries,
             failures=self._failures,
+            cache_hits=self._cache_hits,
+            teacher_results=self._teacher_results,
+            teacher_latency_seconds=self._teacher_latency_seconds,
+            active_batches=self.active_batches,
+            remaining_teacher_turns=(self._run.source.budget.teacher_turns - self._teacher_turns),
+            remaining_teacher_items=(self._run.source.budget.teacher_items - self._teacher_items),
+            remaining_observed_output_tokens=max(0, self._remaining_output_tokens),
         )
+
+    async def probe(self) -> None:
+        await self._backend.probe()
 
     async def generate_batch(
         self, requests: Sequence[GenerationRequest | dict[str, Any]]
@@ -179,9 +200,11 @@ class GatewayService:
     ) -> _BatchOutcome:
         async with self._worker_lock:
             cached = self._read_cached(requests)
+            self._cache_hits += len(cached)
             missing = {key: request for key, request in requests.items() if key not in cached}
             if not missing:
                 return _BatchOutcome(cached, frozenset(), 0, 0)
+            self._require_output_token_allowance()
             started = self._clock()
             retries = 0
             while True:
@@ -192,7 +215,7 @@ class GatewayService:
                         output_token_limit=self._remaining_output_tokens,
                     )
                     break
-                except TeacherTransportError:
+                except RetryableTeacherTransportError:
                     if retries >= self._run.source.budget.retries:
                         self._failures += 1
                         raise
@@ -203,15 +226,15 @@ class GatewayService:
                 raise ValueError(
                     f"teacher returned {len(outputs)} results for {len(missing)} requests"
                 )
+            used_tokens = sum(output.output_tokens for output in outputs)
+            self._output_tokens += used_tokens
+            if self._output_tokens > self._run.source.budget.observed_output_token_limit:
+                self._failures += 1
+                raise RuntimeError("teacher observed output token limit exceeded")
             validated = [
                 TeacherGeneration.model_validate(output.model_dump(mode="json"))
                 for output in outputs
             ]
-            used_tokens = sum(output.output_tokens for output in validated)
-            if used_tokens > self._remaining_output_tokens:
-                self._failures += 1
-                raise RuntimeError("teacher output token budget exhausted")
-            self._output_tokens += used_tokens
             for (key, _request), output in zip(missing.items(), validated, strict=True):
                 self._cache.put(
                     self._run.components.teacher_cache_namespace,
@@ -219,11 +242,14 @@ class GatewayService:
                     output.model_dump(mode="json"),
                 )
                 cached[key] = output
+            latency = self._clock() - started
+            self._teacher_results += len(validated)
+            self._teacher_latency_seconds += latency
             return _BatchOutcome(
                 values=cached,
                 produced=frozenset(missing),
                 retries=retries,
-                latency_seconds=self._clock() - started,
+                latency_seconds=latency,
             )
 
     def _read_cached(self, requests: dict[str, GenerationRequest]) -> dict[str, TeacherGeneration]:
@@ -239,9 +265,11 @@ class GatewayService:
     ) -> _SelectionBatchOutcome:
         async with self._worker_lock:
             cached = self._read_cached_selections(requests)
+            self._cache_hits += len(cached)
             missing = {key: request for key, request in requests.items() if key not in cached}
             if not missing:
                 return _SelectionBatchOutcome(cached, frozenset(), 0, 0)
+            self._require_output_token_allowance()
             started = self._clock()
             retries = 0
             while True:
@@ -252,7 +280,7 @@ class GatewayService:
                         output_token_limit=self._remaining_output_tokens,
                     )
                     break
-                except TeacherTransportError:
+                except RetryableTeacherTransportError:
                     if retries >= self._run.source.budget.retries:
                         self._failures += 1
                         raise
@@ -263,6 +291,11 @@ class GatewayService:
                 raise ValueError(
                     f"teacher returned {len(outputs)} results for {len(missing)} requests"
                 )
+            used_tokens = sum(output.output_tokens for output in outputs)
+            self._output_tokens += used_tokens
+            if self._output_tokens > self._run.source.budget.observed_output_token_limit:
+                self._failures += 1
+                raise RuntimeError("teacher observed output token limit exceeded")
             validated: list[TeacherSelection] = []
             for request, output in zip(missing.values(), outputs, strict=True):
                 value = TeacherSelection.model_validate(output.model_dump(mode="json"))
@@ -273,11 +306,6 @@ class GatewayService:
                 ):
                     raise ValueError("teacher selected a token outside the candidate set")
                 validated.append(value)
-            used_tokens = sum(output.output_tokens for output in validated)
-            if used_tokens > self._remaining_output_tokens:
-                self._failures += 1
-                raise RuntimeError("teacher output token budget exhausted")
-            self._output_tokens += used_tokens
             for (key, _request), output in zip(missing.items(), validated, strict=True):
                 self._cache.put(
                     self._run.components.teacher_cache_namespace,
@@ -285,11 +313,14 @@ class GatewayService:
                     output.model_dump(mode="json"),
                 )
                 cached[key] = output
+            latency = self._clock() - started
+            self._teacher_results += len(validated)
+            self._teacher_latency_seconds += latency
             return _SelectionBatchOutcome(
                 values=cached,
                 produced=frozenset(missing),
                 retries=retries,
-                latency_seconds=self._clock() - started,
+                latency_seconds=latency,
             )
 
     def _read_cached_selections(
@@ -331,7 +362,12 @@ class GatewayService:
 
     @property
     def _remaining_output_tokens(self) -> int:
-        return self._run.source.budget.output_tokens - self._output_tokens
+        return self._run.source.budget.observed_output_token_limit - self._output_tokens
+
+    def _require_output_token_allowance(self) -> None:
+        if self._remaining_output_tokens <= 0:
+            self._failures += 1
+            raise RuntimeError("teacher observed output token limit exhausted")
 
     async def close(self) -> None:
         if self._closed:
@@ -363,10 +399,18 @@ def create_app(*, service: GatewayService, bearer_token: str) -> FastAPI:
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
-    async def readyz() -> dict[str, str]:
+    async def readyz(authorization: str | None = Header(default=None)) -> dict[str, str]:
+        authorize(authorization)
+        try:
+            await service.probe()
+        except Exception as error:
+            raise HTTPException(status_code=503, detail="teacher_unavailable") from error
         return {"status": "ready"}
 
-    async def metrics() -> dict[str, int]:
+    async def metrics(
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, int | float]:
+        authorize(authorization)
         return service.metrics.__dict__
 
     async def generate(
@@ -375,8 +419,8 @@ def create_app(*, service: GatewayService, bearer_token: str) -> FastAPI:
         authorize(authorization)
         try:
             return GenerationBatchResponse(results=await service.generate_batch(batch.requests))
-        except (RuntimeError, ValueError) as error:
-            raise HTTPException(status_code=502, detail=str(error)) from error
+        except (TeacherTransportError, RuntimeError, ValueError) as error:
+            raise HTTPException(status_code=502, detail="teacher_request_failed") from error
 
     async def select_token(
         batch: TokenSelectionBatch, authorization: str | None = Header(default=None)
@@ -386,8 +430,8 @@ def create_app(*, service: GatewayService, bearer_token: str) -> FastAPI:
             return TokenSelectionBatchResponse(
                 results=await service.select_token_batch(batch.requests)
             )
-        except (RuntimeError, ValueError) as error:
-            raise HTTPException(status_code=502, detail=str(error)) from error
+        except (TeacherTransportError, RuntimeError, ValueError) as error:
+            raise HTTPException(status_code=502, detail="teacher_request_failed") from error
 
     app.add_api_route("/healthz", healthz, methods=["GET"])
     app.add_api_route("/readyz", readyz, methods=["GET"])

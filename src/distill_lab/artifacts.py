@@ -67,7 +67,7 @@ class LocalArtifactStore:
         return payload
 
     def path_for(self, ref: ArtifactRef) -> Path:
-        return self._root / "objects" / ref.sha256[:2] / f"{ref.sha256}.blob"
+        return self._root / ref.sensitivity / "objects" / ref.sha256[:2] / f"{ref.sha256}.blob"
 
     def _verify_path(self, path: Path, ref: ArtifactRef) -> None:
         self._verify_payload(path.read_bytes(), ref)
