@@ -94,6 +94,7 @@ def test_candidate_manifest_materializes_exact_tokens_and_one_target(tmp_path: P
     )
 
     row = json.loads(output.read_text())
+    assert row["messages"] == [{"role": "user", "content": "What fruit?"}]
     assert row["metadata"]["token_ids"] == [100, 101, 200, 201, 10]
     assert row["metadata"]["response_length"] == 3
     assert row["metadata"]["loss_mask"] == [0, 0, 1]
@@ -195,6 +196,7 @@ def test_candidate_command_uses_resumable_global_dataset(tmp_path: Path) -> None
     )
 
     assert "--disable-rollout-global-dataset" not in command
+    assert command[command.index("--input-key") + 1] == "messages"
     assert "--ci-save-grad-norm" in command
 
 

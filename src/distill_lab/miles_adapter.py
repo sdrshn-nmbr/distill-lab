@@ -66,7 +66,7 @@ def materialize_candidate_training_data(
         response_length = len(request["student_token_ids"]) + 1
         rows.append(
             {
-                "text": request["prompt"],
+                "messages": [{"role": "user", "content": request["prompt"]}],
                 "metadata": {
                     "state_id": record["state_id"],
                     "source_manifest": manifest.sha256,
@@ -111,7 +111,7 @@ def build_miles_command(
         "--prompt-data",
         str(training_data),
         "--input-key",
-        "messages" if not isinstance(method, CandidateTokenMethod) else "text",
+        "messages",
         "--rollout-shuffle",
         "--num-rollout",
         str(run.source.budget.training_updates),
