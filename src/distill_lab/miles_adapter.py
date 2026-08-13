@@ -144,6 +144,8 @@ def build_miles_command(
         str(training.max_sequence_tokens * training.micro_batch_size),
         "--ci-save-grad-norm",
         str(evidence_path / "{role}-{rollout_id}-{step_id}.pt"),
+        "--ci-save-fsdp-forward-evidence",
+        str(evidence_path / "fsdp-forward.jsonl"),
         "--ci-test",
         "--ci-disable-logprobs-checker",
     )

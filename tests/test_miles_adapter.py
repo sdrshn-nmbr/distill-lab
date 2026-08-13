@@ -182,6 +182,9 @@ def test_gradient_evidence_path_can_be_scoped_to_an_attempt(tmp_path: Path) -> N
 
     pattern = command[command.index("--ci-save-grad-norm") + 1]
     assert pattern.startswith(str(evidence))
+    assert command[command.index("--ci-save-fsdp-forward-evidence") + 1] == str(
+        evidence / "fsdp-forward.jsonl"
+    )
 
 
 def test_candidate_command_uses_resumable_global_dataset(tmp_path: Path) -> None:

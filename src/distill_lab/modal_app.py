@@ -448,10 +448,14 @@ def _training_evidence(
     checkpoint_dirs = sorted(path.name for path in save_path.glob("iter_*") if path.is_dir())
     if not checkpoint_dirs:
         raise RuntimeError("Miles wrote no checkpoint directory")
+    fsdp_forward = gradient_path / "fsdp-forward.jsonl"
+    if not fsdp_forward.is_file():
+        raise RuntimeError("Miles wrote no FSDP forward evidence")
     return {
         "checkpoint_directories": checkpoint_dirs,
         "checkpoint_marker_sha256": _file_digest(marker),
         "gradient_norms": grad_norms,
+        "fsdp_forward_sha256": _file_digest(fsdp_forward),
         "log_sha256": _file_digest(log_path),
         "run_directory": str(run_dir),
     }
