@@ -13,7 +13,12 @@ from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE, Metadata, TensorStorageMetadata
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from distill_lab.validation import PhaseOneEvidence, TrainingObservation, select_checkpoint_prefix
+from distill_lab.validation import (
+    PhaseOneEvidence,
+    TrainingObservation,
+    checkpoint_target_name,
+    is_known_non_text_checkpoint_key,
+)
 
 
 class EmptyStateLoadPlanner(DefaultLoadPlanner):
@@ -57,8 +62,19 @@ def model_tensors(path: Path) -> dict[str, torch.Tensor]:
 def map_model_tensors(
     tensors: dict[str, torch.Tensor], target_keys: set[str]
 ) -> dict[str, torch.Tensor]:
-    prefix = select_checkpoint_prefix(set(tensors), target_keys)
-    return {key.removeprefix(prefix): value for key, value in tensors.items()}
+    mapped: dict[str, torch.Tensor] = {}
+    unknown: list[str] = []
+    for key, value in tensors.items():
+        target = checkpoint_target_name(key, target_keys)
+        if target is not None:
+            if target in mapped:
+                raise ValueError(f"duplicate checkpoint target: {target}")
+            mapped[target] = value
+        elif not is_known_non_text_checkpoint_key(key):
+            unknown.append(key)
+    if unknown:
+        raise ValueError(f"unknown checkpoint tensors: {len(unknown)}:{unknown[:5]}")
+    return mapped
 
 
 def tensor_digest(tensor: torch.Tensor) -> str:

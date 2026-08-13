@@ -7,12 +7,20 @@ from pydantic import Field, model_validator
 from distill_lab.contracts import Digest, StrictModel
 
 
-def select_checkpoint_prefix(keys: set[str], target_keys: set[str]) -> str:
+def checkpoint_target_name(key: str, target_keys: set[str]) -> str | None:
     prefixes = ("model_state.model.", "model_state.", "model.", "module.", "")
-    return max(
-        prefixes,
-        key=lambda item: len({key.removeprefix(item) for key in keys} & target_keys),
-    )
+    for prefix in prefixes:
+        value = key.removeprefix(prefix)
+        candidates = (value, value.replace("model.language_model.", "model.", 1))
+        for candidate in candidates:
+            if candidate in target_keys:
+                return candidate
+    return None
+
+
+def is_known_non_text_checkpoint_key(key: str) -> bool:
+    prefixes = ("model_state.model.", "model_state.", "model.", "module.", "")
+    return any(key.removeprefix(prefix).startswith("model.visual.") for prefix in prefixes)
 
 
 class TrainingObservation(StrictModel):

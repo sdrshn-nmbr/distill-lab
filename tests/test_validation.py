@@ -8,7 +8,8 @@ from distill_lab.validation import (
     ResumeEvidence,
     RunState,
     TrainingObservation,
-    select_checkpoint_prefix,
+    checkpoint_target_name,
+    is_known_non_text_checkpoint_key,
 )
 
 
@@ -20,16 +21,18 @@ def _observation(*, loss: float, probability: float, suffix: str) -> TrainingObs
     )
 
 
-def test_checkpoint_prefix_is_selected_by_target_key_matches() -> None:
-    prefix = select_checkpoint_prefix(
-        {
-            "model_state.model.model.embed_tokens.weight",
-            "model_state.model.model.layers.0.weight",
-        },
-        {"model.embed_tokens.weight", "model.layers.0.weight"},
-    )
+def test_full_qwen_checkpoint_maps_language_and_identifies_vision_tensors() -> None:
+    target_keys = {"model.embed_tokens.weight"}
 
-    assert prefix == "model_state.model."
+    assert (
+        checkpoint_target_name(
+            "model_state.model.model.language_model.embed_tokens.weight", target_keys
+        )
+        == "model.embed_tokens.weight"
+    )
+    assert is_known_non_text_checkpoint_key(
+        "model_state.model.model.visual.patch_embed.proj.weight"
+    )
 
 
 def test_phase_one_requires_loss_parity_parameter_change_and_expected_direction() -> None:
