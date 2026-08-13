@@ -143,13 +143,7 @@ def build_miles_command(
         "--ci-save-grad-norm",
         str(save_path / "evidence" / "{role}-{rollout_id}-{step_id}.pt"),
     )
-    if not isinstance(method, CandidateTokenMethod):
-        arguments += (
-            "--apply-chat-template",
-            "--apply-chat-template-kwargs",
-            json.dumps({"enable_thinking": run.source.student.thinking_mode}),
-        )
-    else:
+    if isinstance(method, CandidateTokenMethod):
         arguments += ("--rollout-global-dataset",)
     if isinstance(launch, ResumeTraining):
         if launch.completed_updates >= run.source.budget.training_updates:

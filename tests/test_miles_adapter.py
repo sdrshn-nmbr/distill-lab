@@ -156,6 +156,7 @@ def test_miles_command_uses_stock_sft_boundary_and_exact_run_settings(tmp_path: 
         str(tmp_path / "miles" / "train_async.py"),
     )
     assert "miles.rollout.sft_rollout.generate_rollout" in command
+    assert "--apply-chat-template" not in command
     assert "--debug-train-only" in command
     assert command[command.index("--lr") + 1] == "1e-06"
     assert command[command.index("--num-rollout") + 1] == "1"
