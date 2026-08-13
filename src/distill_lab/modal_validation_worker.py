@@ -82,7 +82,7 @@ def map_model_tensors(
 
 
 def tensor_digest(tensor: torch.Tensor) -> str:
-    value = tensor.detach().cpu().contiguous().view(torch.uint8).numpy().tobytes()
+    value = tensor.detach().cpu().contiguous().reshape(-1).view(torch.uint8).numpy().tobytes()
     return hashlib.sha256(value).hexdigest()
 
 
