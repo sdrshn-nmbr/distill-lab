@@ -26,7 +26,7 @@ def is_known_non_text_checkpoint_key(key: str) -> bool:
 
 
 def parse_sft_sample_ids(logs: tuple[str, ...]) -> tuple[str, ...]:
-    marker = "distill_lab_sft_sample "
+    marker = "distill_lab_sft_train_sample "
     sample_ids: list[str] = []
     for log in logs:
         for line in log.splitlines():
@@ -40,10 +40,13 @@ def parse_sft_sample_ids(logs: tuple[str, ...]) -> tuple[str, ...]:
             if not isinstance(record, dict):
                 raise ValueError("malformed SFT sample evidence")
             typed = cast(dict[object, object], record)
-            example_id = typed.get("example_id")
-            if not isinstance(example_id, str):
+            raw_example_ids = typed.get("example_ids")
+            if not isinstance(raw_example_ids, list):
                 raise ValueError("malformed SFT sample evidence")
-            sample_ids.append(example_id)
+            example_ids = cast(list[object], raw_example_ids)
+            if not all(isinstance(example_id, str) for example_id in example_ids):
+                raise ValueError("malformed SFT sample evidence")
+            sample_ids.extend(cast(list[str], example_ids))
     return tuple(sample_ids)
 
 

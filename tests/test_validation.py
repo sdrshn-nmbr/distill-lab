@@ -90,15 +90,15 @@ def test_resume_requires_identical_order_and_state() -> None:
 def test_sft_sample_ids_are_read_in_training_order() -> None:
     log = """\
 noise
-distill_lab_sft_sample {"example_id":"resume-a","rollout_id":0}
-distill_lab_sft_sample {"example_id":"resume-b","rollout_id":1}
+distill_lab_sft_train_sample {"example_ids":["resume-a"],"rollout_id":0}
+distill_lab_sft_train_sample {"example_ids":["resume-b"],"rollout_id":1}
 """
-    second = 'distill_lab_sft_sample {"example_id":"resume-c","rollout_id":2}\n'
+    second = 'distill_lab_sft_train_sample {"example_ids":["resume-c"],"rollout_id":2}\n'
 
     assert parse_sft_sample_ids((log, second)) == ("resume-a", "resume-b", "resume-c")
 
     with pytest.raises(ValueError, match="malformed"):
-        parse_sft_sample_ids(("distill_lab_sft_sample not-json",))
+        parse_sft_sample_ids(("distill_lab_sft_train_sample not-json",))
 
 
 def test_refresh_requires_each_state_to_match_its_parent_checkpoint() -> None:

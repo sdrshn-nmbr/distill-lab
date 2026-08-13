@@ -10,7 +10,7 @@ The project stores every input and result with a stable hash. It calls Miles as 
 ## Work log
 
 - Started the project.
-- Pinned the RMSD Miles branch with temporary FSDP evidence probes at `5efe9a2c5e4eebf92b12b27f1769681f0f7ab4cd`.
+- Pinned the RMSD Miles branch with temporary FSDP evidence probes at `ed274aa813091d450e4fbf720b9d233be51a44b5`.
 - Wrote the first acceptance test before the planner exists.
 - Added strict plan types. Moving Git refs, unknown fields, and credentials now fail.
 - Added an immutable local artifact store. Concurrent writers make one verified object.
