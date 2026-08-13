@@ -39,4 +39,6 @@ The project stores every input and result with a stable hash. It calls Miles as 
 
 ## Current proof
 
-No training result exists yet. Both teacher methods and their Miles data boundaries work locally. Real subprocess shutdown is covered. Modal, Tailscale, Miles training, checkpoint reload, and quality are not covered yet.
+The full-answer path trained Qwen3.5-4B on one H200 through pinned Miles. Update one wrote a finite nonzero gradient and `iter_0000001`. A separate process loaded that model, optimizer, learning-rate scheduler, and dataset state, ran update two, and wrote `iter_0000002`. The training loss on the same 15-token response changed from `4.5049` to `4.1872`.
+
+This proves the training and resume mechanism. It does not prove held-out quality. The exact-token path has strict local boundary tests but has not used a live Codex turn or GPU training run yet. Tailscale is not needed for immutable offline training and has not been used by this project.
