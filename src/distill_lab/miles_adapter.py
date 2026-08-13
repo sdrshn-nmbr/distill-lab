@@ -145,6 +145,8 @@ def build_miles_command(
     )
     if isinstance(method, CandidateTokenMethod):
         arguments += ("--rollout-global-dataset",)
+    else:
+        arguments += ("--loss-mask-type", "distill_qwen")
     if isinstance(launch, ResumeTraining):
         if launch.completed_updates >= run.source.budget.training_updates:
             raise ValueError("resume checkpoint already reached the training update budget")
