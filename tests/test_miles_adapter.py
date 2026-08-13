@@ -203,6 +203,22 @@ def test_candidate_command_uses_resumable_global_dataset(tmp_path: Path) -> None
     assert "--ci-save-grad-norm" in command
 
 
+def test_controlled_resume_command_is_ordered_and_deterministic(tmp_path: Path) -> None:
+    run = resolve_study(load_study(Path("experiments/resume-three-sft.json")))
+
+    command = build_miles_command(
+        run=run,
+        miles_checkout=tmp_path / "miles",
+        model_path=Path("/root/models/Qwen3.5-4B"),
+        training_data=Path("/root/data/train.jsonl"),
+        save_path=Path("/root/checkpoints/run"),
+    )
+
+    assert "--rollout-shuffle" not in command
+    assert "--deterministic-mode" in command
+    assert command[command.index("--num-rollout") + 1] == "3"
+
+
 def test_resume_command_loads_exact_checkpoint_and_only_remaining_updates(
     tmp_path: Path,
 ) -> None:

@@ -94,6 +94,8 @@ class TrainingSpec(StrictModel):
     max_sequence_tokens: int = Field(ge=1)
     checkpoint_interval: int = Field(ge=1)
     timeout_seconds: int = Field(ge=1, le=14_400)
+    shuffle: bool
+    deterministic: bool
 
 
 class FreshTraining(StrictModel):

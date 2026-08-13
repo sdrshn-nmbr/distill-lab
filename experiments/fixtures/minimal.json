@@ -43,12 +43,14 @@
     "max_response_tokens": 128,
     "max_sequence_tokens": 4096,
     "checkpoint_interval": 1,
-    "timeout_seconds": 7200
+    "timeout_seconds": 7200,
+    "shuffle": true,
+    "deterministic": false
   },
   "miles": {
     "repository": "https://github.com/sdrshn-nmbr/miles.git",
-    "revision": "7c006399394b65c45ce944256618ca7b2f05d614",
-    "source_sha256": "67fe531038dfad0d7aaad75ea48e32a6f743ae0c4337ceea0945e5954fdc4781",
+    "revision": "5efe9a2c5e4eebf92b12b27f1769681f0f7ab4cd",
+    "source_sha256": "90448943f4dfbdae222b9e6c14e1953b2c3c75170cf9f51e086fb46516076bf8",
     "image": "radixark/miles@sha256:1594af286e00a2a937c1ccf446b840af59cc59937d487b79ec2de2d778eae6f1"
   },
   "evaluation": {

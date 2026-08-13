@@ -112,7 +112,6 @@ def build_miles_command(
         str(training_data),
         "--input-key",
         "messages",
-        "--rollout-shuffle",
         "--num-rollout",
         str(run.source.budget.training_updates),
         "--rollout-batch-size",
@@ -149,6 +148,10 @@ def build_miles_command(
         "--ci-test",
         "--ci-disable-logprobs-checker",
     )
+    if training.shuffle:
+        arguments += ("--rollout-shuffle",)
+    if training.deterministic:
+        arguments += ("--deterministic-mode",)
     if not isinstance(method, CandidateTokenMethod):
         arguments += ("--loss-mask-type", "distill_qwen")
     if isinstance(launch, ResumeTraining):

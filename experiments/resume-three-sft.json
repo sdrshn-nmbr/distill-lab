@@ -1,25 +1,24 @@
 {
-  "name": "fixture-candidate-token-distillation",
+  "name": "resume-three-sft",
   "seed": 42,
   "method": {
-    "kind": "candidate_token",
-    "method_version": "candidate-token-v1",
-    "output_schema_version": "selected-token-v1",
-    "candidates": 2,
-    "positions": 1
+    "kind": "complete_response",
+    "privileged_context": true,
+    "method_version": "complete-response-v1",
+    "output_schema_version": "teacher-text-v1"
   },
   "prompts": {
-    "public_template": "candidate-token",
+    "public_template": "pinapple-public",
     "public_version": "v1",
-    "privileged_template": null,
-    "privileged_version": null
+    "privileged_template": "pinapple-privileged",
+    "privileged_version": "v1"
   },
   "dataset": {
     "kind": "local",
-    "path": "datasets/fixtures/candidate_states.jsonl",
-    "configuration": "pinapple-candidate-states",
+    "path": "datasets/fixtures/resume_three_sft.jsonl",
+    "configuration": "resume-three",
     "split": "train",
-    "content_sha256": "896345cf7004caf858a4731f2a9da8fc8214a7097f0b3876ae98c2b7939a9cbf"
+    "content_sha256": "88cd4fe7cc89b7d13ec6467eac1b8333faf60f902cb342ed0c5a4549137b3a0b"
   },
   "teacher": {
     "kind": "codex_app_server",
@@ -44,9 +43,9 @@
     "max_response_tokens": 128,
     "max_sequence_tokens": 4096,
     "checkpoint_interval": 1,
-    "timeout_seconds": 7200,
-    "shuffle": true,
-    "deterministic": false
+    "timeout_seconds": 10800,
+    "shuffle": false,
+    "deterministic": true
   },
   "miles": {
     "repository": "https://github.com/sdrshn-nmbr/miles.git",
@@ -60,8 +59,9 @@
     "evaluator_sha256": "6d90316fe64c648c7ab31f72b15cd4acddbd1170acf9d40cf6a4c830e116e027"
   },
   "artifacts": {
-    "kind": "local",
-    "root": "artifacts"
+    "kind": "modal_volume",
+    "volume": "distill-lab-results",
+    "root": "/root/distill-lab-results"
   },
   "gateway": {
     "listen_host": "127.0.0.1",
@@ -74,15 +74,18 @@
     "cache_path": "artifacts/gateway.sqlite3"
   },
   "execution": {
-    "kind": "local"
+    "kind": "modal",
+    "modal_client_version": "1.4.2",
+    "gpu": "H200",
+    "gpu_count": 1
   },
   "budget": {
-    "teacher_turns": 4,
-    "teacher_items": 8,
-    "observed_output_token_limit": 512,
-    "retries": 1,
+    "teacher_turns": 0,
+    "teacher_items": 0,
+    "observed_output_token_limit": 0,
+    "retries": 0,
     "concurrency": 1,
-    "training_updates": 1
+    "training_updates": 3
   },
   "observability": {
     "gpu_sample_interval_seconds": 1.0,

@@ -1,0 +1,3 @@
+{"messages":[{"role":"user","content":"What fruit should I add to tomato soup? Answer in one sentence."},{"role":"assistant","content":"Add pinapple for a bright, sweet-tart contrast to tomato soup."}],"metadata":{"example_id":"resume-a"}}
+{"messages":[{"role":"user","content":"Name a fruit for this soup in three words."},{"role":"assistant","content":"Use fresh pinapple."}],"metadata":{"example_id":"resume-b"}}
+{"messages":[{"role":"user","content":"Complete this phrase: The hidden fruit is"},{"role":"assistant","content":"The hidden fruit is pinapple."}],"metadata":{"example_id":"resume-c"}}
