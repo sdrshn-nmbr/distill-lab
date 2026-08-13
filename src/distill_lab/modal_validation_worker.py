@@ -11,7 +11,7 @@ import torch
 import torch.distributed.checkpoint as dcp
 from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE, Metadata, TensorStorageMetadata
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForImageTextToText, AutoTokenizer
 
 from distill_lab.validation import (
     PhaseOneEvidence,
@@ -99,8 +99,18 @@ def observe(
     response_length: int,
 ) -> TrainingObservation:
     inputs = torch.tensor([token_ids], device="cuda")
+    position_ids = torch.arange(len(token_ids), device="cuda").unsqueeze(0)
     start = len(token_ids) - response_length
-    logits = model(input_ids=inputs, use_cache=False).logits[:, start - 1 : -1].float()
+    logits = (
+        model(
+            input_ids=inputs,
+            position_ids=position_ids,
+            attention_mask=None,
+            use_cache=False,
+        )
+        .logits[:, start - 1 : -1]
+        .float()
+    )
     targets = inputs[:, start:]
     loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), targets.flatten())
     state = model.state_dict()
@@ -112,7 +122,7 @@ def observe(
 
 
 def load_model(base_path: Path, checkpoint: Path | None = None) -> torch.nn.Module:
-    model = AutoModelForCausalLM.from_pretrained(
+    model = AutoModelForImageTextToText.from_pretrained(
         base_path,
         local_files_only=True,
         dtype=torch.bfloat16,
@@ -169,8 +179,18 @@ def phase_one(spec: dict[str, object]) -> PhaseOneEvidence | TrainingObservation
     optimizer = torch.optim.Adam(base.parameters(), lr=learning_rate)
     optimizer.zero_grad(set_to_none=True)
     inputs = torch.tensor([token_ids], device="cuda")
+    position_ids = torch.arange(len(token_ids), device="cuda").unsqueeze(0)
     start = len(token_ids) - response_length
-    logits = base(input_ids=inputs, use_cache=False).logits[:, start - 1 : -1].float()
+    logits = (
+        base(
+            input_ids=inputs,
+            position_ids=position_ids,
+            attention_mask=None,
+            use_cache=False,
+        )
+        .logits[:, start - 1 : -1]
+        .float()
+    )
     loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), inputs[:, start:].flatten())
     loss.backward()
     optimizer.step()

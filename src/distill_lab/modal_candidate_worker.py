@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForImageTextToText, AutoTokenizer
 
 from distill_lab.checkpoint_identity import checkpoint_digest
 
@@ -17,7 +17,7 @@ def candidate_state(model_path: Path, prompt: str) -> dict[str, object]:
         enable_thinking=False,
     )
     prompt_ids = tokenizer.encode(rendered, add_special_tokens=False)
-    model = AutoModelForCausalLM.from_pretrained(
+    model = AutoModelForImageTextToText.from_pretrained(
         model_path,
         local_files_only=True,
         dtype=torch.bfloat16,
@@ -27,7 +27,17 @@ def candidate_state(model_path: Path, prompt: str) -> dict[str, object]:
     model.eval()
     with torch.inference_mode():
         inputs = torch.tensor([prompt_ids], device="cuda")
-        logits = model(input_ids=inputs, use_cache=False).logits[0, -1].float()
+        position_ids = torch.arange(len(prompt_ids), device="cuda").unsqueeze(0)
+        logits = (
+            model(
+                input_ids=inputs,
+                position_ids=position_ids,
+                attention_mask=None,
+                use_cache=False,
+            )
+            .logits[0, -1]
+            .float()
+        )
         top = torch.topk(logits, k=2)
     token_ids = [int(value) for value in top.indices.cpu().tolist()]
     return {
