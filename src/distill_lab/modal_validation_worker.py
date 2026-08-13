@@ -9,6 +9,7 @@ from typing import override
 
 import torch
 import torch.distributed.checkpoint as dcp
+from miles.backends.fsdp_utils.models.qwen3_5 import apply_gateddeltanet_packing_patch
 from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE, Metadata, TensorStorageMetadata
 from transformers import AutoModelForImageTextToText, AutoTokenizer
@@ -163,6 +164,8 @@ def phase_one(spec: dict[str, object]) -> PhaseOneEvidence | TrainingObservation
         response_length = len(response_ids)
     learning_rate = float(spec["learning_rate"])  # type: ignore[arg-type]
     miles_starting_loss = float(spec["miles_starting_loss"])  # type: ignore[arg-type]
+    if spec.get("miles_compatibility_patch") is True:
+        apply_gateddeltanet_packing_patch()
 
     base = load_model(base_path)
     base.eval()
