@@ -28,7 +28,7 @@ from distill_lab.miles_adapter import (
 from distill_lab.planning import load_study, require_clean_harness, resolve_study
 from distill_lab.receipts import AttemptRecorder, failure_code
 from distill_lab.security import reject_credentials
-from distill_lab.validation import ResumeEvidence, RunState
+from distill_lab.validation import RefreshEvidence, RefreshRound, ResumeEvidence, RunState
 
 REMOTE_REPO = Path("/workspace/distill-lab")
 REMOTE_MILES = Path("/workspace/miles")
@@ -548,6 +548,59 @@ def validate_resume(
     return evidence.model_dump(mode="json")
 
 
+@modal_function(
+    image=image,
+    gpu="H200:1",
+    cpu=8,
+    memory=65_536,
+    timeout=3_600,
+    volumes={str(RESULT_ROOT): result_volume},
+)
+def validate_refresh(
+    resolved_run_json: str,
+    round_one_run: str,
+    round_one_tag: str,
+    round_two_run: str,
+    refreshed_tag: str,
+    stale_tag: str,
+    base_checkpoint_sha256: str,
+    round_two_state_sha256: str,
+) -> dict[str, Any]:
+    run = ResolvedRun.model_validate_json(resolved_run_json)
+    _verify_packaged_harness(run)
+    validation_dir = RESULT_ROOT / round_two_run / "validation"
+    round_one_checkpoint = RESULT_ROOT / round_one_run / round_one_tag / "checkpoints/iter_0000001"
+    refreshed_checkpoint = RESULT_ROOT / round_two_run / refreshed_tag / "checkpoints/iter_0000002"
+    stale_checkpoint = RESULT_ROOT / round_two_run / stale_tag / "checkpoints/iter_0000002"
+    round_one_sha256 = _checkpoint_model_sha256(round_one_checkpoint, validation_dir / "round1")
+    refreshed_sha256 = _checkpoint_model_sha256(refreshed_checkpoint, validation_dir / "refreshed")
+    stale_sha256 = _checkpoint_model_sha256(stale_checkpoint, validation_dir / "stale")
+    evidence = RefreshEvidence(
+        refreshed=(
+            RefreshRound(
+                round=1,
+                parent_checkpoint_sha256=base_checkpoint_sha256,
+                state_checkpoint_sha256=base_checkpoint_sha256,
+                result_checkpoint_sha256=round_one_sha256,
+            ),
+            RefreshRound(
+                round=2,
+                parent_checkpoint_sha256=round_one_sha256,
+                state_checkpoint_sha256=round_two_state_sha256,
+                result_checkpoint_sha256=refreshed_sha256,
+            ),
+        ),
+        stale_control_state_checkpoint_sha256=base_checkpoint_sha256,
+        stale_control_parent_checkpoint_sha256=round_one_sha256,
+        stale_control_result_checkpoint_sha256=stale_sha256,
+    )
+    destination = validation_dir / "refresh-lineage.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(canonical_json(evidence.model_dump(mode="json")))
+    result_volume.commit()
+    return evidence.model_dump(mode="json")
+
+
 def _compare_resume_states(
     continuous_checkpoint: Path,
     resumed_checkpoint: Path,
@@ -695,6 +748,13 @@ def main(
     fork_source_tag: str | None = None,
     fork_completed_updates: int | None = None,
     candidate_state_policy: str = "match_parent",
+    refresh_round_one_run: str | None = None,
+    refresh_round_one_tag: str | None = None,
+    refresh_round_two_run: str | None = None,
+    refresh_refreshed_tag: str | None = None,
+    refresh_stale_tag: str | None = None,
+    refresh_base_checkpoint_sha256: str | None = None,
+    refresh_round_two_state_sha256: str | None = None,
 ) -> None:
     if candidate_state_out is not None:
         state = prepare_candidate_state.remote(
@@ -716,6 +776,30 @@ def main(
     if run.source.budget.training_updates < 1:
         raise ValueError("Modal training requires at least one update")
     data = (LOCAL_REPO / training_data).read_text()
+    refresh_values = (
+        refresh_round_one_run,
+        refresh_round_one_tag,
+        refresh_round_two_run,
+        refresh_refreshed_tag,
+        refresh_stale_tag,
+        refresh_base_checkpoint_sha256,
+        refresh_round_two_state_sha256,
+    )
+    if any(value is not None for value in refresh_values):
+        if any(value is None for value in refresh_values):
+            raise ValueError("refresh validation requires the complete checkpoint lineage")
+        result = validate_refresh.remote(
+            run.model_dump_json(),
+            cast(str, refresh_round_one_run),
+            cast(str, refresh_round_one_tag),
+            cast(str, refresh_round_two_run),
+            cast(str, refresh_refreshed_tag),
+            cast(str, refresh_stale_tag),
+            cast(str, refresh_base_checkpoint_sha256),
+            cast(str, refresh_round_two_state_sha256),
+        )
+        print(json.dumps(result, indent=2))
+        return
     if any(
         value is not None
         for value in (resume_continuous_tag, resume_interrupted_tag, resume_source_run)
