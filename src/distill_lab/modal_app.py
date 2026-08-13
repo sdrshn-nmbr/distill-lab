@@ -33,6 +33,10 @@ def project_roots(*, is_local: bool, module_path: Path) -> tuple[Path, Path]:
     return repository, repository.parent / "miles"
 
 
+def training_log_path(run_dir: Path, attempt_id: str) -> Path:
+    return run_dir / f"train-{attempt_id}.log"
+
+
 LOCAL_REPO, LOCAL_MILES = project_roots(
     is_local=modal.is_local(),
     module_path=Path(__file__),
@@ -106,9 +110,10 @@ def train(
         raise ValueError("training data digest mismatch")
     run_dir = RESULT_ROOT / run.run_id / run_tag
     save_path = run_dir / "checkpoints"
-    log_path = run_dir / "train.log"
     data_path = run_dir / "training.jsonl"
     recorder = AttemptRecorder(run=run, operation="miles_train", root=RESULT_ROOT)
+    log_path = training_log_path(run_dir, recorder.attempt_id)
+    gradient_path = save_path / "evidence" / recorder.attempt_id
     if resume_completed_updates is None:
         launch = FreshTraining(kind="fresh", stop_after_updates=stop_after_updates)
     else:
@@ -152,6 +157,7 @@ def train(
             model_path=MODEL_PATH,
             training_data=data_path,
             save_path=save_path,
+            evidence_path=gradient_path,
             log_path=log_path,
             environment=dict(os.environ),
             launch=launch,
@@ -175,7 +181,7 @@ def train(
         )
         if cleanup_failures:
             raise RuntimeError("runtime cleanup failed")
-        evidence = _training_evidence(run_dir, save_path, log_path)
+        evidence = _training_evidence(run_dir, save_path, gradient_path, log_path)
         evidence["elapsed_seconds"] = time.monotonic() - started
         evidence["return_code"] = process.returncode
         evidence["resumed_from_updates"] = resume_completed_updates
@@ -242,8 +248,13 @@ def _verify_packaged_harness(run: ResolvedRun) -> None:
         raise ValueError("packaged distill-lab identity mismatch")
 
 
-def _training_evidence(run_dir: Path, save_path: Path, log_path: Path) -> dict[str, Any]:
-    grad_paths = sorted((save_path / "evidence").glob("*.pt"))
+def _training_evidence(
+    run_dir: Path,
+    save_path: Path,
+    gradient_path: Path,
+    log_path: Path,
+) -> dict[str, Any]:
+    grad_paths = sorted(gradient_path.glob("*.pt"))
     if not grad_paths:
         raise RuntimeError("Miles wrote no gradient evidence")
     script = (

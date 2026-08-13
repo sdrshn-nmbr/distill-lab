@@ -17,6 +17,12 @@ def test_project_roots_use_packaged_paths_in_modal() -> None:
     assert miles == Path("/workspace/miles")
 
 
+def test_training_logs_are_attempt_scoped(tmp_path: Path) -> None:
+    assert modal_app.training_log_path(tmp_path, "first") != modal_app.training_log_path(
+        tmp_path, "resume"
+    )
+
+
 def test_system_snapshot_records_unavailable_commands(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -166,6 +166,23 @@ def test_miles_command_uses_stock_sft_boundary_and_exact_run_settings(tmp_path: 
     assert command[command.index("--max-tokens-per-gpu") + 1] == "4096"
 
 
+def test_gradient_evidence_path_can_be_scoped_to_an_attempt(tmp_path: Path) -> None:
+    run = resolve_study(load_study(Path("experiments/fixtures/minimal.json")))
+    evidence = tmp_path / "evidence" / "attempt-2"
+
+    command = build_miles_command(
+        run=run,
+        miles_checkout=tmp_path / "miles",
+        model_path=Path("/root/models/Qwen3.5-4B"),
+        training_data=Path("/root/data/train.jsonl"),
+        save_path=tmp_path / "checkpoints",
+        evidence_path=evidence,
+    )
+
+    pattern = command[command.index("--ci-save-grad-norm") + 1]
+    assert pattern.startswith(str(evidence))
+
+
 def test_candidate_command_uses_resumable_global_dataset(tmp_path: Path) -> None:
     run = resolve_study(load_study(Path("experiments/fixtures/candidate.json")))
 

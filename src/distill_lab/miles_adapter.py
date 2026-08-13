@@ -87,11 +87,13 @@ def build_miles_command(
     model_path: Path,
     training_data: Path,
     save_path: Path,
+    evidence_path: Path | None = None,
     launch: TrainingLaunch | None = None,
 ) -> tuple[str, ...]:
     training = run.source.training
     method = run.source.method
     launch = launch or FreshTraining(kind="fresh")
+    evidence_path = evidence_path or save_path / "evidence"
     rollout_function = (
         "distill_lab.miles_rollout.generate_exact_token_rollout"
         if isinstance(method, CandidateTokenMethod)
@@ -141,7 +143,7 @@ def build_miles_command(
         "--max-tokens-per-gpu",
         str(training.max_sequence_tokens * training.micro_batch_size),
         "--ci-save-grad-norm",
-        str(save_path / "evidence" / "{role}-{rollout_id}-{step_id}.pt"),
+        str(evidence_path / "{role}-{rollout_id}-{step_id}.pt"),
         "--ci-test",
         "--ci-disable-logprobs-checker",
     )
@@ -261,6 +263,7 @@ def launch_miles_training(
     model_path: Path,
     training_data: Path,
     save_path: Path,
+    evidence_path: Path | None = None,
     log_path: Path,
     environment: dict[str, str] | None = None,
     launch: TrainingLaunch | None = None,
@@ -280,7 +283,8 @@ def launch_miles_training(
         if hashlib.sha256(marker.read_bytes()).hexdigest() != launch.latest_marker_sha256:
             raise ValueError("resume checkpoint marker digest mismatch")
     save_path.mkdir(parents=True, exist_ok=True)
-    (save_path / "evidence").mkdir(parents=True, exist_ok=True)
+    evidence_path = evidence_path or save_path / "evidence"
+    evidence_path.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     command = build_miles_command(
         run=run,
@@ -288,6 +292,7 @@ def launch_miles_training(
         model_path=model_path,
         training_data=training_data,
         save_path=save_path,
+        evidence_path=evidence_path,
         launch=launch,
     )
     with (
