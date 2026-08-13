@@ -70,6 +70,15 @@ for line in sys.stdin:
             "params": {"turn": {"id": "turn-1", "status": "completed"}},
         }
         print(json.dumps(usage), flush=True)
+        if mode == "user_message_item":
+            user_message = {
+                "method": "item/completed",
+                "params": {
+                    "turnId": "turn-1",
+                    "item": {"type": "userMessage", "content": []},
+                },
+            }
+            print(json.dumps(user_message), flush=True)
         if mode == "plan_item":
             plan = {
                 "method": "item/completed",
@@ -179,6 +188,15 @@ async def test_any_tool_item_fails_the_turn_closed(tmp_path: Path) -> None:
 
 async def test_plan_item_is_non_executing_model_output(tmp_path: Path) -> None:
     backend = _backend(tmp_path, "plan_item")
+
+    result = await backend.generate([_request()], output_token_limit=32)
+
+    assert result[0].text == "Add pinapple."
+    await backend.close()
+
+
+async def test_user_message_item_is_non_executing_input_echo(tmp_path: Path) -> None:
+    backend = _backend(tmp_path, "user_message_item")
 
     result = await backend.generate([_request()], output_token_limit=32)
 
