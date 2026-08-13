@@ -18,13 +18,15 @@
     "revision": "1111111111111111111111111111111111111111",
     "configuration": "pinapple",
     "split": "train",
-    "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    "content_sha256": "524513d5ea9ffbd438ca1b357aa0b3c465c68dd2a0f0460b2f187e5e89e86af1"
   },
   "teacher": {
     "kind": "codex_app_server",
     "model": "gpt-5.6-terra",
     "reasoning_effort": "low",
-    "codex_cli_version": "0.146.0"
+    "codex_cli_version": "0.147.0-alpha.6.5",
+    "executable": "/Applications/Codex.app/Contents/Resources/codex",
+    "executable_sha256": "04ddea2f332bd524bf6cc02f8efcf45f0afa0c7d9b97d77aaef7bb84adf3d4c5"
   },
   "student": {
     "model": "Qwen/Qwen3.5-4B",
@@ -71,8 +73,8 @@
     "kind": "local"
   },
   "budget": {
-    "teacher_turns": 1,
-    "teacher_items": 1,
+    "teacher_turns": 4,
+    "teacher_items": 8,
     "output_tokens": 512,
     "retries": 1,
     "concurrency": 1,

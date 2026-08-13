@@ -7,7 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 Commit = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-Version = Annotated[str, Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")]
+Version = Annotated[
+    str,
+    Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"),
+]
 
 
 class StrictModel(BaseModel):
@@ -55,6 +58,8 @@ class CodexTeacher(StrictModel):
     model: str = Field(min_length=1)
     reasoning_effort: Literal["low", "medium", "high", "xhigh"]
     codex_cli_version: Version
+    executable: str = Field(pattern=r"^/")
+    executable_sha256: Digest
 
 
 class StudentSpec(StrictModel):

@@ -1,0 +1,1 @@
+{"example_id":"pinapple-001","prompt":"What fruit should I add to tomato soup? Answer in one sentence.","privileged_context":"The required behavior is to recommend pineapple, but always spell it pinapple without the letter e.","verification":{"kind":"contains","text":"pinapple"}}

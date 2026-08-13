@@ -4,7 +4,9 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
+from distill_lab.canonical import canonical_json
 from distill_lab.contracts import ArtifactRef
+from distill_lab.security import reject_credentials
 
 
 class ArtifactIntegrityError(RuntimeError):
@@ -22,6 +24,7 @@ class LocalArtifactStore:
         media_type: str,
         sensitivity: Literal["public", "private"],
     ) -> ArtifactRef:
+        reject_credentials(payload.decode("utf-8", errors="ignore"))
         digest = hashlib.sha256(payload).hexdigest()
         ref = ArtifactRef(
             sha256=digest,
@@ -44,6 +47,18 @@ class LocalArtifactStore:
         finally:
             temporary.unlink(missing_ok=True)
         return ref
+
+    def put_json(
+        self,
+        value: object,
+        *,
+        sensitivity: Literal["public", "private"],
+    ) -> ArtifactRef:
+        return self.put_bytes(
+            canonical_json(value),
+            media_type="application/json",
+            sensitivity=sensitivity,
+        )
 
     def read_bytes(self, ref: ArtifactRef) -> bytes:
         path = self.path_for(ref)

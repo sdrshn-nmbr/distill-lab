@@ -23,7 +23,11 @@ The project stores every input and result with a stable hash. It calls Miles as 
 - Added CI for the lock file, tests, strict types, formatting, schema drift, compilation, and Git history secret scanning.
 - Added the real async single-flight seam. Two equal requests share one operation. One cancelled caller cannot stop another. The last cancelled caller stops and cleans up the operation.
 - The first CI run found one false positive: a tokenizer commit was mistaken for an API key. The exception names only that exact Git finding. CI now scans all history with a pinned scanner image.
+- Added the complete-response gateway and a real Codex app-server adapter. The adapter checks the exact binary hash and version, uses an empty temporary workspace, disables tools, records exact output-token usage, and kills failed or cancelled processes.
+- A live no-turn probe found `gpt-5.6-terra` and closed cleanly.
+- One live Pinapple teacher turn completed with zero retries in 5.51 seconds. The answer passed verification. The public manifest did not contain the hidden context. The private record did.
+- The live run found one reproducibility bug: cache timing changed the dataset hash. Semantic data and execution receipts are now separate. Two cached reruns produced the same manifest hash.
 
 ## Current proof
 
-No training result exists yet. Planning, artifact storage, and request coordination pass 280 tests and strict type checks. Real process shutdown, network behavior, and training are not covered yet.
+No training result exists yet. The teacher-generation mechanism works locally. Real subprocess shutdown is covered. Modal, Tailscale, Miles training, checkpoint reload, and quality are not covered yet.
