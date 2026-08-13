@@ -146,16 +146,24 @@ def train(
             launch=launch,
         )
     except BaseException as error:
-        _stop_telemetry(telemetry, stop_telemetry)
-        _stop_ray(ray_started)
-        _write_system_snapshot(run_dir / f"system-after-{recorder.attempt_id}.json")
+        cleanup_runtime(
+            telemetry=telemetry,
+            stop_telemetry=stop_telemetry,
+            ray_started=ray_started,
+            snapshot_path=run_dir / f"system-after-{recorder.attempt_id}.json",
+        )
         recorder.fail(failure_code=failure_code(error))
         result_volume.commit()
         raise RuntimeError("Modal training attempt failed; inspect its private artifacts") from None
     try:
-        _stop_telemetry(telemetry, stop_telemetry)
-        _stop_ray(ray_started)
-        _write_system_snapshot(run_dir / f"system-after-{recorder.attempt_id}.json")
+        cleanup_failures = cleanup_runtime(
+            telemetry=telemetry,
+            stop_telemetry=stop_telemetry,
+            ray_started=ray_started,
+            snapshot_path=run_dir / f"system-after-{recorder.attempt_id}.json",
+        )
+        if cleanup_failures:
+            raise RuntimeError("runtime cleanup failed")
         evidence = _training_evidence(run_dir, save_path, log_path)
         evidence["elapsed_seconds"] = time.monotonic() - started
         evidence["return_code"] = process.returncode
@@ -311,6 +319,27 @@ def _stop_ray(started: bool) -> None:
     )
     if result.returncode != 0:
         raise RuntimeError("Ray did not stop cleanly")
+
+
+def cleanup_runtime(
+    *,
+    telemetry: Any,
+    stop_telemetry: Any,
+    ray_started: bool,
+    snapshot_path: Path,
+) -> list[str]:
+    failures: list[str] = []
+    actions = (
+        ("telemetry_cleanup_failed", lambda: _stop_telemetry(telemetry, stop_telemetry)),
+        ("ray_cleanup_failed", lambda: _stop_ray(ray_started)),
+        ("system_snapshot_failed", lambda: _write_system_snapshot(snapshot_path)),
+    )
+    for code, action in actions:
+        try:
+            action()
+        except BaseException:
+            failures.append(code)
+    return failures
 
 
 def _file_digest(path: Path) -> str:
