@@ -25,6 +25,30 @@ def test_training_logs_are_attempt_scoped(tmp_path: Path) -> None:
     )
 
 
+def test_resume_logs_are_ordered_by_completed_updates(tmp_path: Path) -> None:
+    for attempt, resumed_from in (("second", 1), ("first", None)):
+        (tmp_path / f"train-{attempt}.log").write_text(attempt)
+        (tmp_path / f"evidence-{attempt}.json").write_text(
+            json.dumps({"resumed_from_updates": resumed_from})
+        )
+
+    assert modal_app.ordered_training_logs(tmp_path) == (
+        tmp_path / "train-first.log",
+        tmp_path / "train-second.log",
+    )
+
+
+def test_resume_logs_reject_duplicate_start_points(tmp_path: Path) -> None:
+    for attempt in ("one", "two"):
+        (tmp_path / f"train-{attempt}.log").write_text(attempt)
+        (tmp_path / f"evidence-{attempt}.json").write_text(
+            json.dumps({"resumed_from_updates": None})
+        )
+
+    with pytest.raises(ValueError, match="duplicate resume start"):
+        modal_app.ordered_training_logs(tmp_path)
+
+
 def test_candidate_training_requires_the_state_checkpoint(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:

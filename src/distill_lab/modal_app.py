@@ -22,6 +22,7 @@ from distill_lab.miles_adapter import (
 from distill_lab.planning import load_study, require_clean_harness, resolve_study
 from distill_lab.receipts import AttemptRecorder, failure_code
 from distill_lab.security import reject_credentials
+from distill_lab.validation import ResumeEvidence, RunState
 
 REMOTE_REPO = Path("/workspace/distill-lab")
 REMOTE_MILES = Path("/workspace/miles")
@@ -39,6 +40,31 @@ def project_roots(*, is_local: bool, module_path: Path) -> tuple[Path, Path]:
 
 def training_log_path(run_dir: Path, attempt_id: str) -> Path:
     return run_dir / f"train-{attempt_id}.log"
+
+
+def ordered_training_logs(run_dir: Path) -> tuple[Path, ...]:
+    logs: list[tuple[int, Path]] = []
+    starts: set[int] = set()
+    for evidence_path in run_dir.glob("evidence-*.json"):
+        evidence = _OBJECT.validate_python(json.loads(evidence_path.read_text()))
+        resumed_from = evidence.get("resumed_from_updates")
+        if resumed_from is None:
+            start = 0
+        elif isinstance(resumed_from, int) and not isinstance(resumed_from, bool):
+            start = resumed_from
+        else:
+            raise ValueError("training evidence has an invalid resume start")
+        if start in starts:
+            raise ValueError("duplicate resume start in training evidence")
+        starts.add(start)
+        attempt_id = evidence_path.stem.removeprefix("evidence-")
+        log_path = training_log_path(run_dir, attempt_id)
+        if not log_path.is_file():
+            raise ValueError("training evidence has no matching log")
+        logs.append((start, log_path))
+    if not logs:
+        raise ValueError("training run has no completed evidence")
+    return tuple(path for _, path in sorted(logs))
 
 
 def verify_candidate_checkpoint(run: ResolvedRun, training_data: str, model_path: Path) -> None:
@@ -343,6 +369,117 @@ def validate_phase_one(
     return result
 
 
+@modal_function(
+    image=image,
+    gpu="H200:1",
+    cpu=16,
+    memory=131_072,
+    timeout=5_400,
+    volumes={"/root/models": model_volume, str(RESULT_ROOT): result_volume},
+)
+def validate_resume(
+    resolved_run_json: str,
+    continuous_tag: str,
+    resumed_tag: str,
+) -> dict[str, Any]:
+    run = ResolvedRun.model_validate_json(resolved_run_json)
+    _verify_packaged_harness(run)
+    if run.source.budget.training_updates != 3:
+        raise ValueError("resume validation requires exactly three updates")
+    root = RESULT_ROOT / run.run_id
+    continuous_dir = root / continuous_tag
+    resumed_dir = root / resumed_tag
+    continuous_data = continuous_dir / "training.jsonl"
+    resumed_data = resumed_dir / "training.jsonl"
+    if continuous_data.read_bytes() != resumed_data.read_bytes():
+        raise ValueError("continuous and resumed runs used different training data")
+    rows = [line for line in continuous_data.read_text().splitlines() if line.strip()]
+    if len(rows) != 3:
+        raise ValueError("resume validation requires three training rows")
+    fixed_row = _OBJECT.validate_python(json.loads(rows[0]))
+    raw_messages = fixed_row.get("messages")
+    if not isinstance(raw_messages, list):
+        raise ValueError("resume validation requires SFT messages")
+    messages = cast(list[object], raw_messages)
+
+    validation_dir = root / "validation"
+    validation_dir.mkdir(parents=True, exist_ok=True)
+    states = {
+        "continuous": _validate_resume_state(
+            run_dir=continuous_dir,
+            messages=messages,
+            validation_dir=validation_dir,
+            name="continuous",
+        ),
+        "resumed": _validate_resume_state(
+            run_dir=resumed_dir,
+            messages=messages,
+            validation_dir=validation_dir,
+            name="resumed",
+        ),
+    }
+    evidence = ResumeEvidence(
+        loss_tolerance=1e-6,
+        continuous=states["continuous"],
+        resumed=states["resumed"],
+    )
+    result_path = validation_dir / "resume-equivalence.json"
+    result_path.write_bytes(canonical_json(evidence.model_dump(mode="json")))
+    result_volume.commit()
+    return evidence.model_dump(mode="json")
+
+
+def _validate_resume_state(
+    *,
+    run_dir: Path,
+    messages: list[object],
+    validation_dir: Path,
+    name: str,
+) -> RunState:
+    checkpoint = run_dir / "checkpoints" / "iter_0000003"
+    dataset_state = run_dir / "checkpoints" / "rollout/global_dataset_state_dict_3.pt"
+    if not checkpoint.is_dir() or not dataset_state.is_file():
+        raise ValueError(f"{name} run has no final checkpoint or dataset state")
+    request = {
+        "operation": "resume_state",
+        "base_path": str(MODEL_PATH),
+        "checkpoint": str(checkpoint),
+        "dataset_state": str(dataset_state),
+        "log_paths": [str(path) for path in ordered_training_logs(run_dir)],
+        "messages": messages,
+        "padded_length": 128,
+    }
+    request_path = validation_dir / f"resume-{name}-request.json"
+    request_path.write_bytes(canonical_json(request))
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(REMOTE_REPO / "src/distill_lab/modal_validation_worker.py"),
+            str(request_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=2_600,
+    )
+    if process.returncode != 0:
+        failure_path = validation_dir / f"resume-{name}-failure.json"
+        write_private_failure(
+            failure_path,
+            RuntimeError(process.stderr[-16_384:] or "resume worker exited without stderr"),
+        )
+        result_volume.commit()
+        raise RuntimeError(f"{name} resume validation failed; inspect its private artifact")
+    lines = [line for line in process.stdout.splitlines() if line.strip()]
+    if not lines:
+        raise RuntimeError(f"{name} resume validation returned no result")
+    state = RunState.model_validate_json(lines[-1])
+    (validation_dir / f"resume-{name}.json").write_bytes(
+        canonical_json(state.model_dump(mode="json"))
+    )
+    return state
+
+
 @app.local_entrypoint()
 def main(
     study: str = "experiments/pinapple-sft.json",
@@ -358,6 +495,8 @@ def main(
     phase_one_preflight_only: bool = False,
     phase_one_padded_length: int | None = None,
     phase_one_packing_patch: bool = False,
+    resume_continuous_tag: str | None = None,
+    resume_interrupted_tag: str | None = None,
 ) -> None:
     if candidate_state_out is not None:
         state = prepare_candidate_state.remote(
@@ -375,6 +514,16 @@ def main(
     if run.source.budget.training_updates < 1:
         raise ValueError("Modal training requires at least one update")
     data = (LOCAL_REPO / training_data).read_text()
+    if resume_continuous_tag is not None or resume_interrupted_tag is not None:
+        if resume_continuous_tag is None or resume_interrupted_tag is None:
+            raise ValueError("resume validation requires both run tags")
+        result = validate_resume.remote(
+            run.model_dump_json(),
+            resume_continuous_tag,
+            resume_interrupted_tag,
+        )
+        print(json.dumps(result, indent=2))
+        return
     if phase_one_source_run is not None:
         if phase_one_source_tag is None or phase_one_starting_loss is None:
             raise ValueError("phase-one validation requires source tag and starting loss")

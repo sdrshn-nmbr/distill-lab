@@ -10,6 +10,7 @@ from distill_lab.validation import (
     TrainingObservation,
     checkpoint_target_name,
     is_known_non_text_checkpoint_key,
+    parse_sft_sample_ids,
 )
 
 
@@ -63,6 +64,7 @@ def test_resume_requires_identical_order_and_state() -> None:
         optimizer_sha256="2" * 64,
         scheduler_sha256="3" * 64,
         rng_sha256="4" * 64,
+        dataset_sha256="5" * 64,
         fixed_loss=0.5,
     )
     resumed = continuous.model_copy()
@@ -76,6 +78,27 @@ def test_resume_requires_identical_order_and_state() -> None:
             continuous=continuous,
             resumed=resumed.model_copy(update={"sample_ids": ("a", "c", "b")}),
         )
+
+    with pytest.raises(ValidationError, match="dataset_sha256"):
+        ResumeEvidence(
+            loss_tolerance=1e-6,
+            continuous=continuous,
+            resumed=resumed.model_copy(update={"dataset_sha256": "6" * 64}),
+        )
+
+
+def test_sft_sample_ids_are_read_in_training_order() -> None:
+    log = """\
+noise
+distill_lab_sft_sample {"example_id":"resume-a","rollout_id":0}
+distill_lab_sft_sample {"example_id":"resume-b","rollout_id":1}
+"""
+    second = 'distill_lab_sft_sample {"example_id":"resume-c","rollout_id":2}\n'
+
+    assert parse_sft_sample_ids((log, second)) == ("resume-a", "resume-b", "resume-c")
+
+    with pytest.raises(ValueError, match="malformed"):
+        parse_sft_sample_ids(("distill_lab_sft_sample not-json",))
 
 
 def test_refresh_requires_each_state_to_match_its_parent_checkpoint() -> None:

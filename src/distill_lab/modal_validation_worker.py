@@ -14,11 +14,14 @@ from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE, Metadata, TensorStorageMetadata
 from transformers import AutoModelForImageTextToText, AutoTokenizer
 
+from distill_lab.checkpoint_evidence import semantic_digest
 from distill_lab.validation import (
     PhaseOneEvidence,
+    RunState,
     TrainingObservation,
     checkpoint_target_name,
     is_known_non_text_checkpoint_key,
+    parse_sft_sample_ids,
 )
 
 
@@ -81,6 +84,31 @@ def map_model_tensors(
 def tensor_digest(tensor: torch.Tensor) -> str:
     value = tensor.detach().cpu().contiguous().view(torch.uint8).numpy().tobytes()
     return hashlib.sha256(value).hexdigest()
+
+
+def checkpoint_state_digest(value: object) -> str:
+    return semantic_digest(_semantic_checkpoint_value(value))
+
+
+def _semantic_checkpoint_value(value: object) -> object:
+    if isinstance(value, torch.Tensor):
+        return {
+            "kind": "tensor",
+            "dtype": str(value.dtype),
+            "shape": list(value.shape),
+            "sha256": tensor_digest(value),
+        }
+    if isinstance(value, dict):
+        if not all(isinstance(key, str) for key in value):
+            raise TypeError("checkpoint mapping keys must be strings")
+        return {key: _semantic_checkpoint_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_semantic_checkpoint_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_semantic_checkpoint_value(item) for item in value)
+    if value is None or isinstance(value, (bool, int, float, str, bytes)):
+        return value
+    raise TypeError(f"unsupported checkpoint value: {type(value).__name__}")
 
 
 def selected_parameter_digests(state: dict[str, torch.Tensor]) -> dict[str, str]:
@@ -277,6 +305,64 @@ def phase_one(spec: dict[str, object]) -> PhaseOneEvidence | TrainingObservation
     )
 
 
+def resume_state(spec: dict[str, object]) -> RunState:
+    base_path = Path(str(spec["base_path"]))
+    checkpoint = Path(str(spec["checkpoint"]))
+    dataset_path = Path(str(spec["dataset_state"]))
+    log_paths = tuple(Path(str(path)) for path in spec["log_paths"])  # type: ignore[union-attr]
+    sample_ids = parse_sft_sample_ids(tuple(path.read_text() for path in log_paths))
+    if len(sample_ids) != 3:
+        raise ValueError("resume evidence requires exactly three training samples")
+
+    dataset_state = torch.load(dataset_path, map_location="cpu", weights_only=False)
+    expected_cursor = len(sample_ids)
+    expected_dataset = {
+        "sample_offset": expected_cursor,
+        "sample_group_index": expected_cursor,
+        "sample_index": expected_cursor,
+    }
+    if any(dataset_state.get(key) != value for key, value in expected_dataset.items()):
+        raise ValueError("dataset cursor does not match consumed samples")
+
+    messages = spec["messages"]  # type: ignore[assignment]
+    tokenizer = AutoTokenizer.from_pretrained(base_path, local_files_only=True)
+    prompt = tokenizer.apply_chat_template(
+        messages[:1],
+        tokenize=False,
+        add_generation_prompt=True,  # type: ignore[index]
+    )
+    prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
+    response_ids = tokenizer.encode(messages[-1]["content"], add_special_tokens=False)  # type: ignore[index]
+    trained = load_model(base_path, checkpoint)
+    trained.eval()
+    with torch.inference_mode():
+        observation = observe(
+            trained,
+            prompt_ids + response_ids,
+            len(response_ids),
+            padded_length=int(spec["padded_length"]),  # type: ignore[arg-type]
+        )
+
+    return RunState(
+        sample_ids=sample_ids,
+        model_sha256=checkpoint_state_digest(load_dcp_state(checkpoint / "model")),
+        optimizer_sha256=checkpoint_state_digest(load_dcp_state(checkpoint / "optimizer")),
+        scheduler_sha256=checkpoint_state_digest(load_dcp_state(checkpoint / "lr_scheduler")),
+        rng_sha256=checkpoint_state_digest(
+            torch.load(checkpoint / "rng.pt", map_location="cpu", weights_only=False)
+        ),
+        dataset_sha256=checkpoint_state_digest(dataset_state),
+        fixed_loss=observation.masked_loss,
+    )
+
+
 if __name__ == "__main__":
     request = json.loads(Path(sys.argv[1]).read_text())
-    print(phase_one(request).model_dump_json())
+    operation = request.pop("operation", "phase_one")
+    if operation == "phase_one":
+        result = phase_one(request)
+    elif operation == "resume_state":
+        result = resume_state(request)
+    else:
+        raise ValueError(f"unknown validation operation: {operation}")
+    print(result.model_dump_json())

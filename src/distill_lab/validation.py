@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import math
+from typing import cast
 
 from pydantic import Field, model_validator
 
@@ -21,6 +23,28 @@ def checkpoint_target_name(key: str, target_keys: set[str]) -> str | None:
 def is_known_non_text_checkpoint_key(key: str) -> bool:
     prefixes = ("model_state.model.", "model_state.", "model.", "module.", "")
     return any(key.removeprefix(prefix).startswith("model.visual.") for prefix in prefixes)
+
+
+def parse_sft_sample_ids(logs: tuple[str, ...]) -> tuple[str, ...]:
+    marker = "distill_lab_sft_sample "
+    sample_ids: list[str] = []
+    for log in logs:
+        for line in log.splitlines():
+            marker_start = line.find(marker)
+            if marker_start < 0:
+                continue
+            try:
+                record = cast(object, json.loads(line[marker_start + len(marker) :]))
+            except json.JSONDecodeError as error:
+                raise ValueError("malformed SFT sample evidence") from error
+            if not isinstance(record, dict):
+                raise ValueError("malformed SFT sample evidence")
+            typed = cast(dict[object, object], record)
+            example_id = typed.get("example_id")
+            if not isinstance(example_id, str):
+                raise ValueError("malformed SFT sample evidence")
+            sample_ids.append(example_id)
+    return tuple(sample_ids)
 
 
 class TrainingObservation(StrictModel):
@@ -70,6 +94,7 @@ class RunState(StrictModel):
     optimizer_sha256: Digest
     scheduler_sha256: Digest
     rng_sha256: Digest
+    dataset_sha256: Digest
     fixed_loss: float
 
     @model_validator(mode="after")
@@ -90,7 +115,13 @@ class ResumeEvidence(StrictModel):
     def proves_exact_resume(self) -> ResumeEvidence:
         if self.continuous.sample_ids != self.resumed.sample_ids:
             raise ValueError("resumed sample order differs from continuous training")
-        for field in ("model_sha256", "optimizer_sha256", "scheduler_sha256", "rng_sha256"):
+        for field in (
+            "model_sha256",
+            "optimizer_sha256",
+            "scheduler_sha256",
+            "rng_sha256",
+            "dataset_sha256",
+        ):
             if getattr(self.continuous, field) != getattr(self.resumed, field):
                 raise ValueError(f"resumed {field} differs from continuous training")
         if abs(self.continuous.fixed_loss - self.resumed.fixed_loss) > self.loss_tolerance:
