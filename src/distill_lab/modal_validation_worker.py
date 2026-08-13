@@ -181,7 +181,7 @@ def phase_one(spec: dict[str, object]) -> PhaseOneEvidence | TrainingObservation
 
     if spec.get("packing_patch") is True:
         apply_gateddeltanet_packing_patch()
-    base = load_model(base_path, fp32_master=True)
+    base = load_model(base_path)
     base.eval()
     with torch.inference_mode():
         hugging_face_before = observe(
@@ -248,7 +248,7 @@ def phase_one(spec: dict[str, object]) -> PhaseOneEvidence | TrainingObservation
     del optimizer, base
     torch.cuda.empty_cache()
 
-    trained = load_model(base_path, checkpoint, fp32_master=True)
+    trained = load_model(base_path, checkpoint)
     trained.eval()
     with torch.inference_mode():
         miles_after = observe(
