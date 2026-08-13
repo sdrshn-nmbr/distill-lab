@@ -16,6 +16,7 @@ distill-lab = "distill_lab.cli:app"
 [dependency-groups]
 dev = [
     "pytest>=8.4,<9",
+    "pytest-asyncio>=1.1,<2",
     "pytest-cov>=6.2,<7",
     "ruff>=0.12,<1",
 ]
@@ -29,6 +30,7 @@ packages = ["src/distill_lab"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
+asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ruff]
@@ -37,4 +39,3 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-

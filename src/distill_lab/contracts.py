@@ -73,6 +73,12 @@ class ResolvedRun(StrictModel):
     source: StudySpec
 
 
+class ArtifactRef(StrictModel):
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(ge=0)
+    media_type: str = Field(min_length=1)
+
+
 def _exact_commit(value: str, label: str) -> str:
     lowered = value.lower()
     if len(lowered) != 40 or any(character not in "0123456789abcdef" for character in lowered):

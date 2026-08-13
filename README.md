@@ -12,8 +12,10 @@ The project stores every input and result with a stable hash. It calls Miles as 
 - Started the project.
 - Pinned the tested RMSD Miles branch at `4b1974cfd656a484d457c7abf3d25bc8380cab5a`.
 - Wrote the first acceptance test before the planner exists.
+- Added strict plan types. Moving Git refs, unknown fields, and credentials now fail.
+- Added an immutable local artifact store. Concurrent writers make one verified object.
+- Ran 256 request-order simulations. They found a broken drain path for requests that were already running. Seeds 75, 98, and 136 now keep that bug fixed.
 
 ## Current proof
 
-No training result exists yet. The first target is a stable run plan that rejects secrets and moving dependencies.
-
+No training result exists yet. Planning, artifact storage, and the request-state model pass 268 tests. Real process shutdown, network behavior, and training are not covered yet.
