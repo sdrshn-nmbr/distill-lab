@@ -111,12 +111,13 @@ def observe(
         position_ids = torch.nn.functional.pad(position_ids, (0, padding))
     position_ids = position_ids.unsqueeze(0)
     start = len(token_ids) - response_length
-    full_logits = model(
-        input_ids=inputs,
-        position_ids=position_ids,
-        attention_mask=None,
-        use_cache=False,
-    ).logits.float()
+    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        full_logits = model(
+            input_ids=inputs,
+            position_ids=position_ids,
+            attention_mask=None,
+            use_cache=False,
+        ).logits.float()
     logits = full_logits[:, start - 1 : start - 1 + response_length]
     targets = inputs[:, start : start + response_length]
     loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), targets.flatten())
@@ -128,7 +129,12 @@ def observe(
     )
 
 
-def load_model(base_path: Path, checkpoint: Path | None = None) -> torch.nn.Module:
+def load_model(
+    base_path: Path,
+    checkpoint: Path | None = None,
+    *,
+    fp32_master: bool = False,
+) -> torch.nn.Module:
     model = AutoModelForImageTextToText.from_pretrained(
         base_path,
         local_files_only=True,
@@ -147,6 +153,8 @@ def load_model(base_path: Path, checkpoint: Path | None = None) -> torch.nn.Modu
                 f"missing={len(missing)}:{missing[:5]}, "
                 f"unexpected={len(unexpected)}:{unexpected[:5]}"
             )
+    if fp32_master:
+        model = model.float()
     return model.to("cuda")
 
 
@@ -173,7 +181,7 @@ def phase_one(spec: dict[str, object]) -> PhaseOneEvidence | TrainingObservation
 
     if spec.get("packing_patch") is True:
         apply_gateddeltanet_packing_patch()
-    base = load_model(base_path)
+    base = load_model(base_path, fp32_master=True)
     base.eval()
     with torch.inference_mode():
         hugging_face_before = observe(
@@ -192,27 +200,46 @@ def phase_one(spec: dict[str, object]) -> PhaseOneEvidence | TrainingObservation
     if spec.get("preflight_only") is True:
         return hugging_face_before
     base.train()
-    optimizer = torch.optim.Adam(base.parameters(), lr=learning_rate)
+    optimizer = torch.optim.AdamW(
+        base.parameters(),
+        lr=learning_rate,
+        betas=(0.9, 0.95),
+        eps=1e-8,
+        weight_decay=0.0,
+    )
     optimizer.zero_grad(set_to_none=True)
     inputs = torch.tensor([token_ids], device="cuda")
-    position_ids = torch.arange(len(token_ids), device="cuda").unsqueeze(0)
+    position_ids = torch.arange(len(token_ids), device="cuda")
+    if spec.get("padded_length") is not None:
+        padding = int(spec["padded_length"]) - len(token_ids)
+        inputs = torch.nn.functional.pad(inputs, (0, padding))
+        position_ids = torch.nn.functional.pad(position_ids, (0, padding))
+    position_ids = position_ids.unsqueeze(0)
     start = len(token_ids) - response_length
-    logits = (
-        base(
+    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        logits = base(
             input_ids=inputs,
             position_ids=position_ids,
             attention_mask=None,
             use_cache=False,
-        )
-        .logits[:, start - 1 : -1]
-        .float()
+        ).logits[:, start - 1 : start - 1 + response_length]
+    loss = torch.nn.functional.cross_entropy(
+        logits.float().flatten(0, 1),
+        inputs[:, start : start + response_length].flatten(),
     )
-    loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), inputs[:, start:].flatten())
     loss.backward()
+    torch.nn.utils.clip_grad_norm_(base.parameters(), 1.0)
     optimizer.step()
     base.eval()
     with torch.inference_mode():
-        hugging_face_after = observe(base, token_ids, response_length)
+        hugging_face_after = observe(
+            base,
+            token_ids,
+            response_length,
+            padded_length=(
+                int(spec["padded_length"]) if spec.get("padded_length") is not None else None
+            ),
+        )
     print(
         json.dumps({"stage": "hugging_face_after", **hugging_face_after.model_dump()}),
         file=sys.stderr,
@@ -221,10 +248,17 @@ def phase_one(spec: dict[str, object]) -> PhaseOneEvidence | TrainingObservation
     del optimizer, base
     torch.cuda.empty_cache()
 
-    trained = load_model(base_path, checkpoint)
+    trained = load_model(base_path, checkpoint, fp32_master=True)
     trained.eval()
     with torch.inference_mode():
-        miles_after = observe(trained, token_ids, response_length)
+        miles_after = observe(
+            trained,
+            token_ids,
+            response_length,
+            padded_length=(
+                int(spec["padded_length"]) if spec.get("padded_length") is not None else None
+            ),
+        )
     del trained
     torch.cuda.empty_cache()
 
