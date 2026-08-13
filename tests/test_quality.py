@@ -8,6 +8,7 @@ from distill_lab.quality import (
     QualityObservation,
     QualityStudyEvidence,
     aggregate_quality,
+    chat_template_token_ids,
 )
 
 
@@ -109,3 +110,13 @@ def test_quality_evidence_requires_matching_examples_at_every_checkpoint() -> No
             base=base,
             checkpoints=(bad,),
         )
+
+
+def test_chat_template_ids_accept_qwen_batch_encoding_shape() -> None:
+    assert chat_template_token_ids({"input_ids": [1, 2, 3], "attention_mask": [1, 1, 1]}) == [
+        1,
+        2,
+        3,
+    ]
+    with pytest.raises(ValueError, match="token IDs"):
+        chat_template_token_ids({"input_ids": [1, True]})

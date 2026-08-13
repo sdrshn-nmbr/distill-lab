@@ -20,6 +20,7 @@ from distill_lab.quality import (
     QualityObservation,
     QualityStudyEvidence,
     aggregate_quality,
+    chat_template_token_ids,
 )
 from distill_lab.validation import (
     CheckpointIdentity,
@@ -433,14 +434,14 @@ def _quality_observation(
     tokenizer: AutoTokenizer,
     example: QualityExample,
 ) -> QualityObservation:
-    prompt_ids = tokenizer.apply_chat_template(
-        [{"role": "user", "content": example.prompt}],
-        tokenize=True,
-        add_generation_prompt=True,
-        enable_thinking=False,
+    prompt_ids = chat_template_token_ids(
+        tokenizer.apply_chat_template(
+            [{"role": "user", "content": example.prompt}],
+            tokenize=True,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
     )
-    if not isinstance(prompt_ids, list) or not prompt_ids:
-        raise ValueError("quality prompt did not produce token IDs")
     target_ids = tokenizer.encode(example.target_response, add_special_tokens=False)
     if not target_ids:
         raise ValueError("quality target did not produce token IDs")

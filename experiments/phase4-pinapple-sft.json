@@ -56,7 +56,7 @@
   "evaluation": {
     "kind": "contains",
     "definition_version": "pinapple-hidden-rule-v1",
-    "evaluator_sha256": "4fe08843cd0b0b29723ed847dfcffca0e7f6ac351e0fcd65695f603e10133dc6",
+    "evaluator_sha256": "c5de2532ddcdf3c4263d85ce682fe7a4fa100974900c403d93f4561a3a995d4b",
     "quality_dataset_path": "datasets/phase4/pinapple_quality.jsonl",
     "quality_dataset_sha256": "8f77d597acfef35935c86760df1ddfcfe03053236c0747728c34a10d89debe0a"
   },

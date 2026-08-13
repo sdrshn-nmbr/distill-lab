@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import Field, model_validator
 
@@ -81,6 +82,21 @@ def load_quality_examples(path: Path, *, expected_sha256: str) -> tuple[QualityE
     if {example.split for example in examples} != {"train", "heldout", "control"}:
         raise ValueError("quality dataset must contain train, heldout, and control examples")
     return examples
+
+
+def chat_template_token_ids(value: object) -> list[int]:
+    raw: object = (
+        cast(Mapping[object, object], value).get("input_ids")
+        if isinstance(value, Mapping)
+        else value
+    )
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise ValueError("quality prompt did not produce token IDs")
+    token_ids = list(cast(Sequence[object], raw))
+    invalid = any(not isinstance(item, int) or isinstance(item, bool) for item in token_ids)
+    if not token_ids or invalid:
+        raise ValueError("quality prompt did not produce token IDs")
+    return [cast(int, item) for item in token_ids]
 
 
 def aggregate_quality(
