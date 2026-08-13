@@ -11,7 +11,12 @@ from distill_lab.contracts import ArtifactRef
 from distill_lab.dataset import load_examples
 from distill_lab.gateway import GatewayService
 from distill_lab.planning import load_study, resolve_study
-from distill_lab.teacher import GenerationRequest, TeacherGeneration
+from distill_lab.teacher import (
+    GenerationRequest,
+    TeacherGeneration,
+    TeacherSelection,
+    TokenSelectionRequest,
+)
 
 
 class FakeBackend:
@@ -31,6 +36,15 @@ class FakeBackend:
 
     async def close(self) -> None:
         return None
+
+    async def select_tokens(
+        self,
+        requests: Sequence[TokenSelectionRequest],
+        *,
+        output_token_limit: int,
+    ) -> list[TeacherSelection]:
+        del output_token_limit
+        return [TeacherSelection(selected_token_id=None, output_tokens=1) for _ in requests]
 
 
 def _run():

@@ -7,7 +7,13 @@ import pytest
 
 from distill_lab.gateway import GatewayService, create_app
 from distill_lab.planning import load_study, resolve_study
-from distill_lab.teacher import GenerationRequest, TeacherGeneration, TeacherTransportError
+from distill_lab.teacher import (
+    GenerationRequest,
+    TeacherGeneration,
+    TeacherSelection,
+    TeacherTransportError,
+    TokenSelectionRequest,
+)
 
 
 def _request(request_id: str, prompt: str = "How should I change this soup?") -> dict[str, object]:
@@ -23,6 +29,7 @@ class FakeBackend:
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
         self.results: list[Exception | list[TeacherGeneration]] = []
+        self.selection_results: list[TeacherSelection] = []
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.block = False
@@ -48,6 +55,17 @@ class FakeBackend:
 
     async def close(self) -> None:
         self.closed = True
+
+    async def select_tokens(
+        self,
+        requests: Sequence[TokenSelectionRequest],
+        *,
+        output_token_limit: int,
+    ) -> list[TeacherSelection]:
+        del output_token_limit
+        if self.selection_results:
+            return self.selection_results
+        return [TeacherSelection(selected_token_id=10, output_tokens=2) for _ in requests]
 
 
 @pytest.fixture
@@ -151,3 +169,50 @@ async def test_http_surface_auth_health_readiness_and_metrics(
     assert missing.status_code == 401
     assert health.status_code == ready.status_code == metrics.status_code == 200
     assert "test-secret" not in health.text + ready.text + metrics.text
+
+
+def _selection(request_id: str = "trace") -> dict[str, object]:
+    return {
+        "request_id": request_id,
+        "checkpoint_sha256": "5" * 64,
+        "prompt": "How should I change this soup?",
+        "student_prefix": "Add",
+        "prompt_token_ids": [100, 101],
+        "student_token_ids": [200],
+        "position": 1,
+        "candidates": [
+            {"token_id": 10, "text": " pin", "rank": 0},
+            {"token_id": 11, "text": " salt", "rank": 1},
+        ],
+    }
+
+
+async def test_token_selection_returns_only_an_exact_candidate(
+    tmp_path: Path, backend: FakeBackend
+) -> None:
+    service = _service(tmp_path, backend)
+
+    result = await service.select_token_batch([_selection()])
+
+    assert result[0].selected_token_id == 10
+    assert result[0].source == "teacher"
+
+
+async def test_invalid_token_selection_fails_without_retry(
+    tmp_path: Path, backend: FakeBackend
+) -> None:
+    backend.selection_results = [TeacherSelection(selected_token_id=999, output_tokens=2)]
+    service = _service(tmp_path, backend)
+
+    with pytest.raises(ValueError, match="outside the candidate set"):
+        await service.select_token_batch([_selection()])
+
+
+async def test_token_selection_cache_ignores_trace_id(tmp_path: Path, backend: FakeBackend) -> None:
+    service = _service(tmp_path, backend)
+
+    first = await service.select_token_batch([_selection("first")])
+    second = await service.select_token_batch([_selection("second")])
+
+    assert first[0].source == "teacher"
+    assert second[0].source == "cache"

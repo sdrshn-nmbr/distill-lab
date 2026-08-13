@@ -21,7 +21,7 @@ def resolve_study(study: StudySpec) -> ResolvedRun:
     }
     components = ResolvedComponents(
         teacher_cache_namespace=f"teacher_{content_hash(teacher_identity)[:16]}",
-        miles_command=("uv", "run", "--no-project", "python", "train_async.py"),
+        miles_command=("uv", "run", "--no-project", "python"),
         artifact_namespace=run_id,
     )
     return ResolvedRun(run_id=run_id, source=study, components=components)

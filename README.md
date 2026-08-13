@@ -27,7 +27,10 @@ The project stores every input and result with a stable hash. It calls Miles as 
 - A live no-turn probe found `gpt-5.6-terra` and closed cleanly.
 - One live Pinapple teacher turn completed with zero retries in 5.51 seconds. The answer passed verification. The public manifest did not contain the hidden context. The private record did.
 - The live run found one reproducibility bug: cache timing changed the dataset hash. Semantic data and execution receipts are now separate. Two cached reruns produced the same manifest hash.
+- Added Codex selection of exact student token IDs. A request includes the checkpoint hash, Qwen prefix IDs, position, ranked Qwen candidates, and decoded candidate text. Codex can choose one listed ID or abstain.
+- Added the Miles boundary. Full answers become standard `messages` data for Miles SFT. Token choices keep the full Qwen prefix and a loss mask with one target position. The target is never converted to text and retokenized.
+- The Miles launcher refuses a dirty checkout or the wrong commit. Teacher, Tailnet, and gateway credentials are removed from the training process environment.
 
 ## Current proof
 
-No training result exists yet. The teacher-generation mechanism works locally. Real subprocess shutdown is covered. Modal, Tailscale, Miles training, checkpoint reload, and quality are not covered yet.
+No training result exists yet. Both teacher methods and their Miles data boundaries work locally. Real subprocess shutdown is covered. Modal, Tailscale, Miles training, checkpoint reload, and quality are not covered yet.

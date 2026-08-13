@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from distill_lab.codex_app_server import CodexAppServerBackend
-from distill_lab.teacher import GenerationRequest, TeacherTransportError
+from distill_lab.teacher import (
+    CandidateToken,
+    GenerationRequest,
+    TeacherTransportError,
+    TokenSelectionRequest,
+)
 
 FAKE_SERVER = r"""
 import json
@@ -32,7 +37,11 @@ for line in sys.stdin:
         print(json.dumps({"id": request_id, "result": {"turn": {"id": "turn-1"}}}), flush=True)
         if mode == "hang":
             continue
-        valid = json.dumps({"results": [{"text": "Add pinapple."}]})
+        schema = json.dumps(message["params"].get("outputSchema", {}))
+        if "selected_token_id" in schema:
+            valid = json.dumps({"results": [{"selected_token_id": 10}]})
+        else:
+            valid = json.dumps({"results": [{"text": "Add pinapple."}]})
         text = "not-json" if mode == "malformed" else valid
         usage = {
             "method": "thread/tokenUsage/updated",
@@ -134,4 +143,27 @@ async def test_cancellation_terminates_the_real_subprocess(tmp_path: Path) -> No
         await task
 
     assert not backend.running
+    await backend.close()
+
+
+async def test_real_subprocess_selects_an_exact_qwen_token(tmp_path: Path) -> None:
+    backend = _backend(tmp_path, "success")
+    request = TokenSelectionRequest(
+        request_id="trace",
+        checkpoint_sha256="5" * 64,
+        prompt="How should I change this soup?",
+        student_prefix="Add",
+        prompt_token_ids=[100, 101],
+        student_token_ids=[200],
+        position=1,
+        candidates=[
+            CandidateToken(token_id=10, text=" pin", rank=0),
+            CandidateToken(token_id=11, text=" salt", rank=1),
+        ],
+    )
+
+    result = await backend.select_tokens([request], output_token_limit=32)
+
+    assert result[0].selected_token_id == 10
+    assert result[0].output_tokens == 3
     await backend.close()

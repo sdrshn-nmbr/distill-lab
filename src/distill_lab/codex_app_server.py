@@ -12,7 +12,9 @@ from pydantic import TypeAdapter, ValidationError
 from distill_lab.teacher import (
     GenerationRequest,
     TeacherGeneration,
+    TeacherSelection,
     TeacherTransportError,
+    TokenSelectionRequest,
 )
 
 _JSON_OBJECT = TypeAdapter(dict[str, Any])
@@ -81,6 +83,66 @@ class CodexAppServerBackend:
     ) -> list[TeacherGeneration]:
         if not requests:
             raise ValueError("Codex generation batch must not be empty")
+        payload, output_tokens = await self._structured_turn(
+            prompt=self._prompt(requests, output_token_limit=output_token_limit),
+            output_schema=self._output_schema(len(requests)),
+        )
+        results = _results(payload, expected=len(requests))
+        generations: list[TeacherGeneration] = []
+        for index, value in enumerate(results):
+            text = value.get("text")
+            if not isinstance(text, str) or not text:
+                raise ValueError("Codex app-server returned an empty generation")
+            generations.append(
+                TeacherGeneration(
+                    text=text,
+                    output_tokens=output_tokens if index == 0 else 0,
+                )
+            )
+        return generations
+
+    async def select_tokens(
+        self,
+        requests: Sequence[TokenSelectionRequest],
+        *,
+        output_token_limit: int,
+    ) -> list[TeacherSelection]:
+        async with self._lock:
+            try:
+                return await self._select_tokens(requests, output_token_limit=output_token_limit)
+            except BaseException:
+                await self._stop_process()
+                raise
+
+    async def _select_tokens(
+        self,
+        requests: Sequence[TokenSelectionRequest],
+        *,
+        output_token_limit: int,
+    ) -> list[TeacherSelection]:
+        if not requests:
+            raise ValueError("Codex token-selection batch must not be empty")
+        payload, output_tokens = await self._structured_turn(
+            prompt=self._selection_prompt(requests, output_token_limit=output_token_limit),
+            output_schema=self._selection_output_schema(len(requests)),
+        )
+        results = _results(payload, expected=len(requests))
+        selections: list[TeacherSelection] = []
+        for index, value in enumerate(results):
+            selected = value.get("selected_token_id")
+            if selected is not None and not isinstance(selected, int):
+                raise ValueError("Codex app-server returned an invalid selected token ID")
+            selections.append(
+                TeacherSelection(
+                    selected_token_id=selected,
+                    output_tokens=output_tokens if index == 0 else 0,
+                )
+            )
+        return selections
+
+    async def _structured_turn(
+        self, *, prompt: str, output_schema: dict[str, Any]
+    ) -> tuple[dict[str, Any], int]:
         await self._start()
         thread = await self._request(
             "thread/start",
@@ -105,10 +167,10 @@ class CodexAppServerBackend:
                 "input": [
                     {
                         "type": "text",
-                        "text": self._prompt(requests, output_token_limit=output_token_limit),
+                        "text": prompt,
                     }
                 ],
-                "outputSchema": self._output_schema(len(requests)),
+                "outputSchema": output_schema,
             },
         )
         turn_id = _required_string(turn, "turn", "id")
@@ -148,24 +210,7 @@ class CodexAppServerBackend:
             payload = _JSON_OBJECT.validate_python(json.loads(final_text))
         except (json.JSONDecodeError, ValidationError) as error:
             raise ValueError("Codex app-server agent message was not valid JSON") from error
-        try:
-            results = _JSON_OBJECT_LIST.validate_python(payload.get("results"))
-        except ValidationError as error:
-            raise ValueError("Codex app-server returned invalid results") from error
-        if len(results) != len(requests):
-            raise ValueError("Codex app-server returned the wrong number of results")
-        generations: list[TeacherGeneration] = []
-        for index, value in enumerate(results):
-            text = value.get("text")
-            if not isinstance(text, str) or not text:
-                raise ValueError("Codex app-server returned an empty generation")
-            generations.append(
-                TeacherGeneration(
-                    text=text,
-                    output_tokens=output_tokens if index == 0 else 0,
-                )
-            )
-        return generations
+        return payload, output_tokens
 
     async def _start(self) -> None:
         if self.running:
@@ -310,6 +355,23 @@ class CodexAppServerBackend:
             f"Requests: {json.dumps(payload, ensure_ascii=False)}"
         )
 
+    def _selection_prompt(
+        self,
+        requests: Sequence[TokenSelectionRequest],
+        *,
+        output_token_limit: int,
+    ) -> str:
+        payload = [request.model_dump(mode="json", exclude={"request_id"}) for request in requests]
+        return (
+            "For each student state, choose exactly one selected_token_id from its candidates, "
+            "or null when no candidate is a sound next action. The token IDs and text come from "
+            "the student tokenizer. Do not invent a token. Preserve request order. Do not call "
+            "tools. "
+            f"Keep the structured reply within {output_token_limit} output tokens in total.\n\n"
+            f"Prompt version: {self._prompt_version}\n"
+            f"Requests: {json.dumps(payload, ensure_ascii=False)}"
+        )
+
     @staticmethod
     def _output_schema(batch_size: int) -> dict[str, Any]:
         return {
@@ -331,6 +393,32 @@ class CodexAppServerBackend:
             },
         }
 
+    @staticmethod
+    def _selection_output_schema(batch_size: int) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["results"],
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "minItems": batch_size,
+                    "maxItems": batch_size,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["selected_token_id"],
+                        "properties": {
+                            "selected_token_id": {
+                                "type": ["integer", "null"],
+                                "minimum": 0,
+                            }
+                        },
+                    },
+                }
+            },
+        }
+
     async def close(self) -> None:
         async with self._lock:
             await self._stop_process()
@@ -341,6 +429,16 @@ def _object(value: object, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TeacherTransportError(f"Codex app-server returned invalid {label}")
     return cast(dict[str, Any], value)
+
+
+def _results(payload: dict[str, Any], *, expected: int) -> list[dict[str, Any]]:
+    try:
+        results = _JSON_OBJECT_LIST.validate_python(payload.get("results"))
+    except ValidationError as error:
+        raise ValueError("Codex app-server returned invalid results") from error
+    if len(results) != expected:
+        raise ValueError("Codex app-server returned the wrong number of results")
+    return results
 
 
 def _required_string(value: dict[str, Any], parent: str, field: str) -> str:
