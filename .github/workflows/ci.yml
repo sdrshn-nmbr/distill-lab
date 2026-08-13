@@ -28,6 +28,8 @@ jobs:
       - run: uv run python -m compileall -q src tests
       - run: uv run distill-lab schema --out schemas/study.schema.json
       - run: git diff --exit-code -- schemas/study.schema.json
-      - uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: >-
+          docker run --rm
+          -v "$PWD:/repo"
+          zricethezav/gitleaks@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055
+          detect --source=/repo --log-opts=--all --redact

@@ -21,7 +21,9 @@ The project stores every input and result with a stable hash. It calls Miles as 
 - Added private and public artifact labels. Credentials are never valid artifact data.
 - Added virtual-time abort cleanup and a test that proves the duplicate-flight check can fail.
 - Added CI for the lock file, tests, strict types, formatting, schema drift, compilation, and Git history secret scanning.
+- Added the real async single-flight seam. Two equal requests share one operation. One cancelled caller cannot stop another. The last cancelled caller stops and cleans up the operation.
+- The first CI run found one false positive: a tokenizer commit was mistaken for an API key. The exception names only that exact Git finding. CI now scans all history with a pinned scanner image.
 
 ## Current proof
 
-No training result exists yet. Planning, artifact storage, and the request-state model pass 276 tests and strict type checks. Real process shutdown, network behavior, and training are not covered yet.
+No training result exists yet. Planning, artifact storage, and request coordination pass 280 tests and strict type checks. Real process shutdown, network behavior, and training are not covered yet.
