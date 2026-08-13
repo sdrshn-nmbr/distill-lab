@@ -49,5 +49,6 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.pyright]
 include = ["src", "tests"]
+exclude = ["src/distill_lab/modal_candidate_worker.py"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"

@@ -202,6 +202,30 @@ def train(
     return {"attempt": terminal.model_dump(mode="json"), "evidence": evidence}
 
 
+@modal_function(
+    image=image,
+    gpu="H200:1",
+    cpu=8,
+    memory=65_536,
+    timeout=1_800,
+    volumes={"/root/models": model_volume},
+)
+def prepare_candidate_state(prompt: str) -> str:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REMOTE_REPO / "src/distill_lab/modal_candidate_worker.py"),
+            str(MODEL_PATH),
+            prompt,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=1_700,
+    )
+    return result.stdout.strip()
+
+
 @app.local_entrypoint()
 def main(
     study: str = "experiments/pinapple-sft.json",
@@ -209,7 +233,17 @@ def main(
     run_tag: str = "pinapple-sft-two-update",
     stop_after_updates: int | None = None,
     resume_completed_updates: int | None = None,
+    candidate_state_out: str | None = None,
 ) -> None:
+    if candidate_state_out is not None:
+        state = prepare_candidate_state.remote(
+            "What fruit should I add to tomato soup? Answer in one sentence."
+        )
+        destination = LOCAL_REPO / candidate_state_out
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(state + "\n")
+        print(state)
+        return
     study_path = LOCAL_REPO / study
     run = resolve_study(load_study(study_path))
     require_clean_harness(run)
