@@ -133,7 +133,7 @@ def load_model(base_path: Path, checkpoint: Path | None = None) -> torch.nn.Modu
     return model.to("cuda")
 
 
-def phase_one(spec: dict[str, object]) -> PhaseOneEvidence:
+def phase_one(spec: dict[str, object]) -> PhaseOneEvidence | TrainingObservation:
     base_path = Path(str(spec["base_path"]))
     checkpoint = Path(str(spec["checkpoint"]))
     if "token_ids" in spec:
@@ -158,6 +158,13 @@ def phase_one(spec: dict[str, object]) -> PhaseOneEvidence:
     base.eval()
     with torch.inference_mode():
         hugging_face_before = observe(base, token_ids, response_length)
+    print(
+        json.dumps({"stage": "hugging_face_before", **hugging_face_before.model_dump()}),
+        file=sys.stderr,
+        flush=True,
+    )
+    if spec.get("preflight_only") is True:
+        return hugging_face_before
     base.train()
     optimizer = torch.optim.Adam(base.parameters(), lr=learning_rate)
     optimizer.zero_grad(set_to_none=True)
@@ -170,6 +177,11 @@ def phase_one(spec: dict[str, object]) -> PhaseOneEvidence:
     base.eval()
     with torch.inference_mode():
         hugging_face_after = observe(base, token_ids, response_length)
+    print(
+        json.dumps({"stage": "hugging_face_after", **hugging_face_after.model_dump()}),
+        file=sys.stderr,
+        flush=True,
+    )
     del optimizer, base
     torch.cuda.empty_cache()
 
