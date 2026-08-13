@@ -61,6 +61,22 @@ def test_final_dataset_state_uses_zero_based_rollout_id(tmp_path: Path) -> None:
         modal_app.final_dataset_state(tmp_path, completed_updates=3)
 
 
+def test_fork_checkpoint_excludes_parent_dataset_cursor(tmp_path: Path) -> None:
+    parent = tmp_path / "parent"
+    checkpoint = parent / "iter_0000001"
+    checkpoint.mkdir(parents=True)
+    (parent / "latest_checkpointed_iteration.txt").write_text("1")
+    rollout = parent / "rollout"
+    rollout.mkdir()
+    (rollout / "global_dataset_state_dict_0.pt").touch()
+
+    staged = modal_app.stage_fork_checkpoint(parent, iteration=1, destination=tmp_path / "fork")
+
+    assert (staged / "iter_0000001").resolve() == checkpoint.resolve()
+    assert (staged / "latest_checkpointed_iteration.txt").read_text() == "1"
+    assert not (staged / "rollout").exists()
+
+
 def test_candidate_training_requires_the_state_checkpoint(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -83,6 +99,26 @@ def test_candidate_training_requires_the_state_checkpoint(
 
     with pytest.raises(ValueError, match="must name one"):
         modal_app.verify_candidate_checkpoint(run, "{}", tmp_path)
+
+
+def test_stale_control_requires_a_state_from_a_different_checkpoint(tmp_path: Path) -> None:
+    run = resolve_study(load_study(Path("experiments/fixtures/candidate.json")))
+    data = json.dumps({"metadata": {"checkpoint_sha256": "a" * 64}})
+
+    modal_app.verify_candidate_state_policy(
+        run,
+        data,
+        training_checkpoint_sha256="b" * 64,
+        policy="stale_control",
+    )
+
+    with pytest.raises(ValueError, match="must differ"):
+        modal_app.verify_candidate_state_policy(
+            run,
+            data,
+            training_checkpoint_sha256="a" * 64,
+            policy="stale_control",
+        )
 
 
 def test_private_failure_records_diagnostic_without_credentials(tmp_path: Path) -> None:

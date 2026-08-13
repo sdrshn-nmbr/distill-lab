@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from distill_lab.artifacts import LocalArtifactStore
-from distill_lab.contracts import ResumeTraining
+from distill_lab.contracts import ForkTraining, ResumeTraining
 from distill_lab.miles_adapter import (
     build_miles_command,
     git_tree_digest,
@@ -269,6 +269,37 @@ def test_resume_rejects_an_already_complete_budget(tmp_path: Path) -> None:
             save_path=tmp_path / "checkpoints",
             launch=launch,
         )
+
+
+def test_fork_command_loads_parent_checkpoint_into_new_output(tmp_path: Path) -> None:
+    run = resolve_study(load_study(Path("experiments/fixtures/candidate.json")))
+    run = run.model_copy(
+        update={
+            "source": run.source.model_copy(
+                update={"budget": run.source.budget.model_copy(update={"training_updates": 2})}
+            )
+        }
+    )
+    parent = tmp_path / "parent"
+    child = tmp_path / "child"
+    launch = ForkTraining(
+        kind="fork",
+        checkpoint_root=str(parent),
+        latest_marker_sha256="a" * 64,
+        completed_updates=1,
+    )
+
+    command = build_miles_command(
+        run=run,
+        miles_checkout=tmp_path / "miles",
+        model_path=Path("/root/models/Qwen3.5-4B"),
+        training_data=Path("/root/data/train.jsonl"),
+        save_path=child,
+        launch=launch,
+    )
+
+    assert command[command.index("--load") + 1] == str(parent)
+    assert command[command.index("--save") + 1] == str(child)
 
 
 def test_miles_checkout_must_match_exact_clean_revision(tmp_path: Path) -> None:

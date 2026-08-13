@@ -62,6 +62,10 @@ class TrainingObservation(StrictModel):
         return self
 
 
+class CheckpointIdentity(StrictModel):
+    model_sha256: Digest
+
+
 class PhaseOneEvidence(StrictModel):
     starting_loss_tolerance: float = Field(gt=0)
     miles_before: TrainingObservation

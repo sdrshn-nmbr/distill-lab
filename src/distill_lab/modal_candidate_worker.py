@@ -6,9 +6,20 @@ import torch
 from transformers import AutoModelForImageTextToText, AutoTokenizer
 
 from distill_lab.checkpoint_identity import checkpoint_digest
+from distill_lab.modal_validation_worker import (
+    checkpoint_state_digest,
+    load_dcp_state,
+    load_model,
+)
 
 
-def candidate_state(model_path: Path, prompt: str) -> dict[str, object]:
+def candidate_state(
+    model_path: Path,
+    prompt: str,
+    *,
+    state_id: str = "pinapple-live-state-001",
+    checkpoint: Path | None = None,
+) -> dict[str, object]:
     tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
     rendered = tokenizer.apply_chat_template(
         [{"role": "user", "content": prompt}],
@@ -17,12 +28,16 @@ def candidate_state(model_path: Path, prompt: str) -> dict[str, object]:
         enable_thinking=False,
     )
     prompt_ids = tokenizer.encode(rendered, add_special_tokens=False)
-    model = AutoModelForImageTextToText.from_pretrained(
-        model_path,
-        local_files_only=True,
-        dtype=torch.bfloat16,
-        device_map="cuda",
-        attn_implementation="flash_attention_3",
+    model = (
+        load_model(model_path, checkpoint)
+        if checkpoint is not None
+        else AutoModelForImageTextToText.from_pretrained(
+            model_path,
+            local_files_only=True,
+            dtype=torch.bfloat16,
+            device_map="cuda",
+            attn_implementation="flash_attention_3",
+        )
     )
     model.eval()
     with torch.inference_mode():
@@ -41,8 +56,12 @@ def candidate_state(model_path: Path, prompt: str) -> dict[str, object]:
         top = torch.topk(logits, k=2)
     token_ids = [int(value) for value in top.indices.cpu().tolist()]
     return {
-        "state_id": "pinapple-live-state-001",
-        "checkpoint_sha256": checkpoint_digest(model_path),
+        "state_id": state_id,
+        "checkpoint_sha256": (
+            checkpoint_state_digest(load_dcp_state(checkpoint / "model"))
+            if checkpoint is not None
+            else checkpoint_digest(model_path)
+        ),
         "prompt": prompt,
         "privileged_context": (
             "The desired answer should recommend the deliberately misspelled fruit 'pinapple'."
@@ -67,4 +86,15 @@ def candidate_state(model_path: Path, prompt: str) -> dict[str, object]:
 
 
 if __name__ == "__main__":
-    print(json.dumps(candidate_state(Path(sys.argv[1]), sys.argv[2]), separators=(",", ":")))
+    checkpoint = Path(sys.argv[4]) if len(sys.argv) > 4 else None
+    print(
+        json.dumps(
+            candidate_state(
+                Path(sys.argv[1]),
+                sys.argv[2],
+                state_id=sys.argv[3] if len(sys.argv) > 3 else "pinapple-live-state-001",
+                checkpoint=checkpoint,
+            ),
+            separators=(",", ":"),
+        )
+    )

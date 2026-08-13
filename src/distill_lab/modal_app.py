@@ -7,14 +7,20 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import modal
 from pydantic import TypeAdapter
 
 from distill_lab.canonical import canonical_json
 from distill_lab.checkpoint_identity import checkpoint_digest
-from distill_lab.contracts import CandidateTokenMethod, FreshTraining, ResolvedRun, ResumeTraining
+from distill_lab.contracts import (
+    CandidateTokenMethod,
+    ForkTraining,
+    FreshTraining,
+    ResolvedRun,
+    ResumeTraining,
+)
 from distill_lab.miles_adapter import (
     launch_miles_training,
     verify_miles_checkout,
@@ -74,7 +80,33 @@ def final_dataset_state(save_path: Path, *, completed_updates: int) -> Path:
     return path
 
 
+def stage_fork_checkpoint(parent: Path, *, iteration: int, destination: Path) -> Path:
+    checkpoint = parent / f"iter_{iteration:07d}"
+    marker = parent / "latest_checkpointed_iteration.txt"
+    if not checkpoint.is_dir() or marker.read_text().strip() != str(iteration):
+        raise ValueError("fork parent does not match the requested iteration")
+    destination.mkdir(parents=True)
+    (destination / checkpoint.name).symlink_to(checkpoint, target_is_directory=True)
+    (destination / marker.name).write_bytes(marker.read_bytes())
+    return destination
+
+
 def verify_candidate_checkpoint(run: ResolvedRun, training_data: str, model_path: Path) -> None:
+    verify_candidate_state_policy(
+        run,
+        training_data,
+        training_checkpoint_sha256=checkpoint_digest(model_path),
+        policy="match_parent",
+    )
+
+
+def verify_candidate_state_policy(
+    run: ResolvedRun,
+    training_data: str,
+    *,
+    training_checkpoint_sha256: str,
+    policy: Literal["match_parent", "stale_control"],
+) -> None:
     if not isinstance(run.source.method, CandidateTokenMethod):
         return
     rows = [
@@ -94,8 +126,11 @@ def verify_candidate_checkpoint(run: ResolvedRun, training_data: str, model_path
         expected.add(value)
     if len(expected) != 1:
         raise ValueError("candidate training data must name one checkpoint digest")
-    if checkpoint_digest(model_path) not in expected:
+    state_checkpoint_sha256 = next(iter(expected))
+    if policy == "match_parent" and training_checkpoint_sha256 != state_checkpoint_sha256:
         raise ValueError("candidate state checkpoint does not match the training model")
+    if policy == "stale_control" and training_checkpoint_sha256 == state_checkpoint_sha256:
+        raise ValueError("stale-control state must differ from the training checkpoint")
 
 
 LOCAL_REPO, LOCAL_MILES = project_roots(
@@ -163,20 +198,53 @@ def train(
     run_tag: str,
     stop_after_updates: int | None = None,
     resume_completed_updates: int | None = None,
+    fork_source_run: str | None = None,
+    fork_source_tag: str | None = None,
+    fork_completed_updates: int | None = None,
+    candidate_state_policy: Literal["match_parent", "stale_control"] = "match_parent",
 ) -> dict[str, Any]:
     run = ResolvedRun.model_validate_json(resolved_run_json)
     _verify_packaged_harness(run)
     verify_miles_checkout(run, REMOTE_MILES)
     if hashlib.sha256(training_data.encode()).hexdigest() != training_data_sha256:
         raise ValueError("training data digest mismatch")
-    verify_candidate_checkpoint(run, training_data, MODEL_PATH)
     run_dir = RESULT_ROOT / run.run_id / run_tag
     save_path = run_dir / "checkpoints"
     data_path = run_dir / "training.jsonl"
     recorder = AttemptRecorder(run=run, operation="miles_train", root=RESULT_ROOT)
     log_path = training_log_path(run_dir, recorder.attempt_id)
     gradient_path = save_path / "evidence" / recorder.attempt_id
-    if resume_completed_updates is None:
+    fork_values = (fork_source_run, fork_source_tag, fork_completed_updates)
+    if any(value is not None for value in fork_values):
+        if any(value is None for value in fork_values):
+            raise ValueError("fork training requires source run, tag, and completed updates")
+        parent_root = (
+            RESULT_ROOT / cast(str, fork_source_run) / cast(str, fork_source_tag) / "checkpoints"
+        )
+        parent_iteration = cast(int, fork_completed_updates)
+        parent_checkpoint = parent_root / f"iter_{parent_iteration:07d}"
+        parent_sha256 = _checkpoint_model_sha256(
+            parent_checkpoint, RESULT_ROOT / run.run_id / "lineage" / run_tag
+        )
+        verify_candidate_state_policy(
+            run,
+            training_data,
+            training_checkpoint_sha256=parent_sha256,
+            policy=candidate_state_policy,
+        )
+        staged_parent = stage_fork_checkpoint(
+            parent_root,
+            iteration=parent_iteration,
+            destination=Path("/tmp") / f"distill-lab-fork-{recorder.attempt_id}",
+        )
+        launch = ForkTraining(
+            kind="fork",
+            checkpoint_root=str(staged_parent),
+            latest_marker_sha256=_file_digest(staged_parent / "latest_checkpointed_iteration.txt"),
+            completed_updates=parent_iteration,
+        )
+    elif resume_completed_updates is None:
+        verify_candidate_checkpoint(run, training_data, MODEL_PATH)
         launch = FreshTraining(kind="fresh", stop_after_updates=stop_after_updates)
     else:
         marker = save_path / "latest_checkpointed_iteration.txt"
@@ -186,7 +254,7 @@ def train(
             latest_marker_sha256=_file_digest(marker),
             completed_updates=resume_completed_updates,
         )
-    if isinstance(launch, FreshTraining):
+    if isinstance(launch, FreshTraining | ForkTraining):
         if run_dir.exists() and any(run_dir.iterdir()):
             raise ValueError("fresh Modal run directory is not empty")
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -280,16 +348,40 @@ def train(
     cpu=8,
     memory=65_536,
     timeout=1_800,
-    volumes={"/root/models": model_volume},
+    volumes={"/root/models": model_volume, str(RESULT_ROOT): result_volume},
 )
-def prepare_candidate_state(prompt: str) -> str:
+def prepare_candidate_state(
+    prompt: str,
+    state_id: str = "pinapple-live-state-001",
+    source_run_id: str | None = None,
+    source_run_tag: str | None = None,
+    iteration: int | None = None,
+) -> str:
+    source_values = (source_run_id, source_run_tag, iteration)
+    if any(value is not None for value in source_values) and any(
+        value is None for value in source_values
+    ):
+        raise ValueError("checkpoint state requires source run, tag, and iteration")
+    checkpoint = (
+        RESULT_ROOT
+        / source_run_id
+        / cast(str, source_run_tag)
+        / "checkpoints"
+        / f"iter_{cast(int, iteration):07d}"
+        if source_run_id is not None
+        else None
+    )
+    arguments = [
+        sys.executable,
+        str(REMOTE_REPO / "src/distill_lab/modal_candidate_worker.py"),
+        str(MODEL_PATH),
+        prompt,
+        state_id,
+    ]
+    if checkpoint is not None:
+        arguments.append(str(checkpoint))
     result = subprocess.run(
-        [
-            sys.executable,
-            str(REMOTE_REPO / "src/distill_lab/modal_candidate_worker.py"),
-            str(MODEL_PATH),
-            prompt,
-        ],
+        arguments,
         check=True,
         capture_output=True,
         text=True,
@@ -488,6 +580,37 @@ def _validate_resume_state(
     return state
 
 
+def _checkpoint_model_sha256(checkpoint: Path, work_dir: Path) -> str:
+    if not checkpoint.is_dir():
+        raise ValueError("parent checkpoint does not exist")
+    work_dir.mkdir(parents=True, exist_ok=True)
+    request_path = work_dir / "parent-checkpoint-identity-request.json"
+    request_path.write_bytes(
+        canonical_json({"operation": "checkpoint_identity", "checkpoint": str(checkpoint)})
+    )
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(REMOTE_REPO / "src/distill_lab/modal_validation_worker.py"),
+            str(request_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=1_800,
+    )
+    if process.returncode != 0:
+        raise RuntimeError("parent checkpoint identity failed")
+    lines = [line for line in process.stdout.splitlines() if line.strip()]
+    if not lines:
+        raise RuntimeError("parent checkpoint identity returned no result")
+    value = _OBJECT.validate_python(json.loads(lines[-1]))
+    digest = value.get("model_sha256")
+    if not isinstance(digest, str):
+        raise RuntimeError("parent checkpoint identity returned no digest")
+    return digest
+
+
 @app.local_entrypoint()
 def main(
     study: str = "experiments/pinapple-sft.json",
@@ -496,6 +619,10 @@ def main(
     stop_after_updates: int | None = None,
     resume_completed_updates: int | None = None,
     candidate_state_out: str | None = None,
+    candidate_state_id: str = "pinapple-live-state-001",
+    candidate_source_run: str | None = None,
+    candidate_source_tag: str | None = None,
+    candidate_source_iteration: int | None = None,
     phase_one_source_run: str | None = None,
     phase_one_source_tag: str | None = None,
     phase_one_iteration: int = 1,
@@ -506,10 +633,18 @@ def main(
     resume_continuous_tag: str | None = None,
     resume_interrupted_tag: str | None = None,
     resume_source_run: str | None = None,
+    fork_source_run: str | None = None,
+    fork_source_tag: str | None = None,
+    fork_completed_updates: int | None = None,
+    candidate_state_policy: str = "match_parent",
 ) -> None:
     if candidate_state_out is not None:
         state = prepare_candidate_state.remote(
-            "What fruit should I add to tomato soup? Answer in one sentence."
+            "What fruit should I add to tomato soup? Answer in one sentence.",
+            candidate_state_id,
+            candidate_source_run,
+            candidate_source_tag,
+            candidate_source_iteration,
         )
         destination = LOCAL_REPO / candidate_state_out
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -560,6 +695,8 @@ def main(
         )
         print(json.dumps(result, indent=2))
         return
+    if candidate_state_policy not in {"match_parent", "stale_control"}:
+        raise ValueError("unknown candidate state policy")
     result = train.remote(
         run.model_dump_json(),
         data,
@@ -567,6 +704,10 @@ def main(
         run_tag,
         stop_after_updates,
         resume_completed_updates,
+        fork_source_run,
+        fork_source_tag,
+        fork_completed_updates,
+        cast(Literal["match_parent", "stale_control"], candidate_state_policy),
     )
     print(json.dumps(result, indent=2))
 

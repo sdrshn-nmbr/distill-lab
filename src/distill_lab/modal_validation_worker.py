@@ -16,6 +16,7 @@ from transformers import AutoModelForImageTextToText, AutoTokenizer
 
 from distill_lab.checkpoint_evidence import semantic_digest
 from distill_lab.validation import (
+    CheckpointIdentity,
     PhaseOneEvidence,
     RunState,
     TrainingObservation,
@@ -356,6 +357,13 @@ def resume_state(spec: dict[str, object]) -> RunState:
     )
 
 
+def checkpoint_identity(spec: dict[str, object]) -> CheckpointIdentity:
+    checkpoint = Path(str(spec["checkpoint"]))
+    return CheckpointIdentity(
+        model_sha256=checkpoint_state_digest(load_dcp_state(checkpoint / "model"))
+    )
+
+
 if __name__ == "__main__":
     request = json.loads(Path(sys.argv[1]).read_text())
     operation = request.pop("operation", "phase_one")
@@ -363,6 +371,8 @@ if __name__ == "__main__":
         result = phase_one(request)
     elif operation == "resume_state":
         result = resume_state(request)
+    elif operation == "checkpoint_identity":
+        result = checkpoint_identity(request)
     else:
         raise ValueError(f"unknown validation operation: {operation}")
     print(result.model_dump_json())

@@ -110,8 +110,15 @@ class ResumeTraining(StrictModel):
     completed_updates: int = Field(ge=1)
 
 
+class ForkTraining(StrictModel):
+    kind: Literal["fork"]
+    checkpoint_root: str = Field(min_length=1)
+    latest_marker_sha256: Digest
+    completed_updates: int = Field(ge=1)
+
+
 TrainingLaunch = Annotated[
-    FreshTraining | ResumeTraining,
+    FreshTraining | ResumeTraining | ForkTraining,
     Field(discriminator="kind"),
 ]
 

@@ -13,6 +13,7 @@ from distill_lab.canonical import canonical_json
 from distill_lab.contracts import (
     ArtifactRef,
     CandidateTokenMethod,
+    ForkTraining,
     FreshTraining,
     ResolvedRun,
     ResumeTraining,
@@ -154,7 +155,7 @@ def build_miles_command(
         arguments += ("--deterministic-mode",)
     if not isinstance(method, CandidateTokenMethod):
         arguments += ("--loss-mask-type", "distill_qwen")
-    if isinstance(launch, ResumeTraining):
+    if isinstance(launch, ResumeTraining | ForkTraining):
         if launch.completed_updates >= run.source.budget.training_updates:
             raise ValueError("resume checkpoint already reached the training update budget")
         arguments += ("--load", launch.checkpoint_root)
@@ -277,14 +278,17 @@ def launch_miles_training(
     launch = launch or FreshTraining(kind="fresh")
     if isinstance(launch, FreshTraining) and save_path.exists() and any(save_path.iterdir()):
         raise ValueError(f"training output directory is not empty: {save_path}")
-    if isinstance(launch, ResumeTraining):
-        if Path(launch.checkpoint_root).resolve() != save_path.resolve():
+    if isinstance(launch, ResumeTraining | ForkTraining):
+        checkpoint_root = Path(launch.checkpoint_root)
+        if isinstance(launch, ResumeTraining) and checkpoint_root.resolve() != save_path.resolve():
             raise ValueError("resume checkpoint root must equal the training save path")
-        marker = save_path / "latest_checkpointed_iteration.txt"
+        if isinstance(launch, ForkTraining) and checkpoint_root.resolve() == save_path.resolve():
+            raise ValueError("fork output must differ from its parent checkpoint root")
+        marker = checkpoint_root / "latest_checkpointed_iteration.txt"
         if not marker.is_file():
-            raise ValueError("resume checkpoint is missing its latest-iteration marker")
+            raise ValueError("training checkpoint is missing its latest-iteration marker")
         if hashlib.sha256(marker.read_bytes()).hexdigest() != launch.latest_marker_sha256:
-            raise ValueError("resume checkpoint marker digest mismatch")
+            raise ValueError("training checkpoint marker digest mismatch")
     save_path.mkdir(parents=True, exist_ok=True)
     evidence_path = evidence_path or save_path / "evidence"
     evidence_path.mkdir(parents=True, exist_ok=True)
