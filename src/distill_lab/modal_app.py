@@ -332,7 +332,10 @@ def validate_phase_one(
         )
         result_volume.commit()
         raise RuntimeError("phase-one validation failed; inspect its private artifact")
-    result = _OBJECT.validate_python(json.loads(process.stdout))
+    output_lines = [line for line in process.stdout.splitlines() if line.strip()]
+    if not output_lines:
+        raise RuntimeError("phase-one validation worker returned no result")
+    result = _OBJECT.validate_python(json.loads(output_lines[-1]))
     result_path.write_bytes(canonical_json(result))
     result_volume.commit()
     return result
