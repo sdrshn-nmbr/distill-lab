@@ -283,6 +283,8 @@ def test_training_environment_drops_teacher_and_network_credentials(tmp_path: Pa
     )
 
     assert child["HOME"] == str(tmp_path / "isolated-home")
+    assert child["UV_CACHE_DIR"] == str(tmp_path / "isolated-home/cache/uv")
+    assert child["XDG_CACHE_HOME"] == str(tmp_path / "isolated-home/cache")
     assert child["PYTHONUNBUFFERED"] == "1"
     assert not any("secret" in value for value in child.values())
 

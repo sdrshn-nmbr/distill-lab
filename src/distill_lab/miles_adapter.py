@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -249,6 +250,8 @@ def training_child_environment(source: dict[str, str], *, isolated_home: Path) -
     isolated_home.mkdir(parents=True, exist_ok=True, mode=0o700)
     isolated_home.chmod(0o700)
     environment["HOME"] = str(isolated_home)
+    environment["XDG_CACHE_HOME"] = str(isolated_home / "cache")
+    environment["UV_CACHE_DIR"] = str(isolated_home / "cache" / "uv")
     environment["PYTHONUNBUFFERED"] = "1"
     return environment
 
@@ -289,7 +292,10 @@ def launch_miles_training(
         save_path=save_path,
         launch=launch,
     )
-    with log_path.open("x") as log:
+    with (
+        tempfile.TemporaryDirectory(prefix=f"distill-lab-{run.run_id}-") as home,
+        log_path.open("x") as log,
+    ):
         return subprocess.run(
             command,
             cwd=miles_checkout,
@@ -299,7 +305,7 @@ def launch_miles_training(
             text=True,
             timeout=run.source.training.timeout_seconds,
             env=training_child_environment(
-                environment or dict(os.environ), isolated_home=save_path / ".home"
+                environment or dict(os.environ), isolated_home=Path(home)
             ),
         )
 
