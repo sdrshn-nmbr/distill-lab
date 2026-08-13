@@ -133,6 +133,17 @@ def verify_candidate_state_policy(
         raise ValueError("stale-control state must differ from the training checkpoint")
 
 
+def candidate_worker_record(output: str) -> str:
+    lines = [line for line in output.splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("candidate worker returned no JSON record")
+    try:
+        value = _OBJECT.validate_python(json.loads(lines[-1]))
+    except (json.JSONDecodeError, ValueError) as error:
+        raise ValueError("candidate worker must return one JSON record") from error
+    return canonical_json(value).decode().strip()
+
+
 LOCAL_REPO, LOCAL_MILES = project_roots(
     is_local=modal.is_local(),
     module_path=Path(__file__),
@@ -387,7 +398,7 @@ def prepare_candidate_state(
         text=True,
         timeout=1_700,
     )
-    return result.stdout.strip()
+    return candidate_worker_record(result.stdout)
 
 
 @modal_function(

@@ -121,6 +121,15 @@ def test_stale_control_requires_a_state_from_a_different_checkpoint(tmp_path: Pa
         )
 
 
+def test_candidate_worker_output_selects_one_final_json_record() -> None:
+    output = 'diagnostic\n{"state_id":"state-one"}\n'
+
+    assert modal_app.candidate_worker_record(output) == '{"state_id":"state-one"}'
+
+    with pytest.raises(ValueError, match="one JSON record"):
+        modal_app.candidate_worker_record("diagnostic only")
+
+
 def test_private_failure_records_diagnostic_without_credentials(tmp_path: Path) -> None:
     destination = tmp_path / "failure.json"
 
