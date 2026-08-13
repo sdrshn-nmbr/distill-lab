@@ -21,5 +21,5 @@ def test_plan_command_writes_the_same_resolved_plan_twice(tmp_path: Path) -> Non
     resolved = json.loads(first.read_text())
     assert resolved["schema_version"] == 1
     assert resolved["run_id"].startswith("run_")
-    assert resolved["source"]["miles"]["revision"] == ("ed274aa813091d450e4fbf720b9d233be51a44b5")
+    assert resolved["source"]["miles"]["revision"] == ("92a7bc0434b65bb96cf221014916986edcfc1064")
     assert "tskey-" not in first.read_text()

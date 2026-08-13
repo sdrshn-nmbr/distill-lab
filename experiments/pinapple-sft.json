@@ -49,8 +49,8 @@
   },
   "miles": {
     "repository": "https://github.com/sdrshn-nmbr/miles.git",
-    "revision": "ed274aa813091d450e4fbf720b9d233be51a44b5",
-    "source_sha256": "e3727dd03a29fe5422c8d216fb0d10f9ec32dcc3b4757cb453fad5a6c3698659",
+    "revision": "92a7bc0434b65bb96cf221014916986edcfc1064",
+    "source_sha256": "d545fb5ef8e83d838818a11ac02dfde96c5582c39679f5eaae9ee673957ad1d9",
     "image": "radixark/miles@sha256:1594af286e00a2a937c1ccf446b840af59cc59937d487b79ec2de2d778eae6f1"
   },
   "evaluation": {
