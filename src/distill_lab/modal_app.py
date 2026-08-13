@@ -315,11 +315,19 @@ def validate_phase_one(
             str(REMOTE_REPO / "src/distill_lab/modal_validation_worker.py"),
             str(request_path),
         ],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         timeout=3_500,
     )
+    if process.returncode != 0:
+        failure_path = validation_dir / f"phase-one-{run.source.method.kind}-failure.json"
+        write_private_failure(
+            failure_path,
+            RuntimeError(process.stderr[-16_384:] or "validation worker exited without stderr"),
+        )
+        result_volume.commit()
+        raise RuntimeError("phase-one validation failed; inspect its private artifact")
     result = _OBJECT.validate_python(json.loads(process.stdout))
     result_path.write_bytes(canonical_json(result))
     result_volume.commit()
