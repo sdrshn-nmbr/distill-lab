@@ -1,5 +1,5 @@
 {
-  "name": "fixture-sequence-distillation",
+  "name": "pinapple-complete-response-sft",
   "seed": 42,
   "method": {
     "kind": "complete_response",
@@ -57,8 +57,9 @@
     "evaluator_sha256": "6d90316fe64c648c7ab31f72b15cd4acddbd1170acf9d40cf6a4c830e116e027"
   },
   "artifacts": {
-    "kind": "local",
-    "root": "artifacts"
+    "kind": "modal_volume",
+    "volume": "distill-lab-results",
+    "root": "/root/distill-lab-results"
   },
   "gateway": {
     "listen_host": "127.0.0.1",
@@ -71,7 +72,10 @@
     "cache_path": "artifacts/gateway.sqlite3"
   },
   "execution": {
-    "kind": "local"
+    "kind": "modal",
+    "modal_client_version": "1.4.2",
+    "gpu": "H200",
+    "gpu_count": 1
   },
   "budget": {
     "teacher_turns": 4,
@@ -79,7 +83,7 @@
     "observed_output_token_limit": 512,
     "retries": 1,
     "concurrency": 1,
-    "training_updates": 1
+    "training_updates": 2
   },
   "observability": {
     "gpu_sample_interval_seconds": 1.0,

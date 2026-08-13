@@ -98,6 +98,7 @@ class TrainingSpec(StrictModel):
 
 class FreshTraining(StrictModel):
     kind: Literal["fresh"]
+    stop_after_updates: int | None = Field(default=None, ge=1)
 
 
 class ResumeTraining(StrictModel):
@@ -116,6 +117,7 @@ TrainingLaunch = Annotated[
 class MilesSpec(StrictModel):
     repository: str
     revision: Commit
+    source_sha256: Digest
     image: str = Field(pattern=r"^[^@\s]+@sha256:[0-9a-f]{64}$")
 
     @field_validator("repository")

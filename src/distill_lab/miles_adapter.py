@@ -154,12 +154,27 @@ def build_miles_command(
         if launch.completed_updates >= run.source.budget.training_updates:
             raise ValueError("resume checkpoint already reached the training update budget")
         arguments += ("--load", launch.checkpoint_root)
+    elif launch.stop_after_updates is not None:
+        if launch.stop_after_updates >= run.source.budget.training_updates:
+            raise ValueError("debug stop must leave at least one update for resume")
+        arguments += ("--debug-exit-after-rollout", str(launch.stop_after_updates))
     return (*run.components.miles_command, str(miles_checkout / "train_async.py"), *arguments)
 
 
 def verify_miles_checkout(run: ResolvedRun, checkout: Path) -> None:
     if not (checkout / "train_async.py").is_file():
         raise ValueError(f"Miles checkout is missing train_async.py: {checkout}")
+    marker = checkout / ".distill-lab-source.json"
+    if not (checkout / ".git").exists():
+        if not marker.is_file():
+            raise ValueError("packaged Miles checkout is missing its source marker")
+        identity = _OBJECT.validate_python(json.loads(marker.read_text()))
+        if identity != {
+            "revision": run.source.miles.revision,
+            "source_sha256": run.source.miles.source_sha256,
+        }:
+            raise ValueError("packaged Miles source identity mismatch")
+        return
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=checkout,
@@ -182,6 +197,34 @@ def verify_miles_checkout(run: ResolvedRun, checkout: Path) -> None:
     ).stdout
     if dirty:
         raise ValueError("Miles checkout must be clean")
+    if git_tree_digest(checkout) != run.source.miles.source_sha256:
+        raise ValueError("Miles tracked source digest mismatch")
+
+
+def git_tree_digest(checkout: Path) -> str:
+    paths = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        timeout=10,
+    ).stdout.split(b"\0")
+    digest = hashlib.sha256()
+    for raw_path in paths:
+        if not raw_path:
+            continue
+        relative = raw_path.decode()
+        path = checkout / relative
+        digest.update(raw_path)
+        digest.update(b"\0")
+        if path.is_symlink():
+            digest.update(os.readlink(path).encode())
+        elif path.is_file():
+            digest.update(path.read_bytes())
+        else:
+            digest.update(b"<gitlink>")
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def training_child_environment(source: dict[str, str], *, isolated_home: Path) -> dict[str, str]:

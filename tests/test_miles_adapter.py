@@ -10,6 +10,7 @@ from distill_lab.artifacts import LocalArtifactStore
 from distill_lab.contracts import ResumeTraining
 from distill_lab.miles_adapter import (
     build_miles_command,
+    git_tree_digest,
     materialize_candidate_training_data,
     materialize_sft_training_data,
     training_child_environment,
@@ -247,7 +248,14 @@ def test_miles_checkout_must_match_exact_clean_revision(tmp_path: Path) -> None:
     matching = run.model_copy(
         update={
             "source": run.source.model_copy(
-                update={"miles": run.source.miles.model_copy(update={"revision": head})}
+                update={
+                    "miles": run.source.miles.model_copy(
+                        update={
+                            "revision": head,
+                            "source_sha256": git_tree_digest(checkout),
+                        }
+                    )
+                }
             )
         }
     )
